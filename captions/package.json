@@ -1,0 +1,25 @@
+{
+  "name": "sermon-captions",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render CaptionedClip",
+    "upgrade": "remotion upgrade"
+  },
+  "dependencies": {
+    "@remotion/captions": "^4.0.290",
+    "@remotion/cli": "^4.0.290",
+    "@remotion/fonts": "^4.0.290",
+    "@remotion/media-utils": "^4.0.290",
+    "@remotion/studio": "^4.0.503",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.290",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "^5.8.0"
+  }
+}
