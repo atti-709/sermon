@@ -156,18 +156,20 @@ def run_export_vertical(args: argparse.Namespace) -> None:
 
     video = Path(args.video)
     out = Path(args.out)
+    hook = (args.hook_start, args.hook_end) if args.hook_start is not None and args.hook_end is not None else None
+    opening = f" (opening with the {args.hook_end - args.hook_start:.0f}s hook)" if hook else ""
     emit({"event": "progress", "percent": None, "stage": "tracking",
-          "detail": f"tracking the speaker in {args.start:.0f}s–{args.end:.0f}s (Apple Vision)…"})
+          "detail": f"tracking the speaker in {args.start:.0f}s–{args.end:.0f}s{opening} (Apple Vision)…"})
     last = {"pct": -5.0}
 
     def on_progress(pct: float) -> None:
         if pct - last["pct"] >= 1:  # don't flood the stream at ffmpeg speed
             last["pct"] = pct
             emit({"event": "progress", "percent": round(pct, 1), "stage": "encoding",
-                  "detail": f"rendering vertical ProRes… {pct:.0f}%"})
+                  "detail": f"rendering the vertical clip… {pct:.0f}%"})
 
     with contextlib.redirect_stdout(_LineWriter(lambda line: emit({"event": "log", "line": line}))):
-        export_vertical_clip(video, args.start, args.end, out, on_progress=on_progress)
+        export_vertical_clip(video, args.start, args.end, out, on_progress=on_progress, hook=hook)
     emit({"event": "result", "paths": {"vertical": str(out)}})
 
 
@@ -220,6 +222,9 @@ def main() -> None:
     p.add_argument("--video", required=True)
     p.add_argument("--start", type=float, required=True)
     p.add_argument("--end", type=float, required=True)
+    # both present: cut this window in front of the passage (hook-first clip)
+    p.add_argument("--hook-start", type=float, default=None)
+    p.add_argument("--hook-end", type=float, default=None)
     p.add_argument("--out", required=True)
     p.set_defaults(func=run_export_vertical)
 

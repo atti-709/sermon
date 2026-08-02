@@ -327,6 +327,11 @@ def _build_job(req: JobRequest) -> tuple[list[str], Path, dict | None, list[Path
             "export-vertical", "--video", str(video),
             "--start", str(start), "--end", str(end), "--out", str(out),
         )
+        # optional: open the clip with its hook moment instead of playing the
+        # passage straight through (the Resolve XML lays the same shape out)
+        hook_start, hook_end = p.get("hook_start_sec"), p.get("hook_end_sec")
+        if hook_start is not None and hook_end is not None:
+            argv += ["--hook-start", str(float(hook_start)), "--hook-end", str(float(hook_end))]
         return argv, repo_cwd, {"paths": {"vertical": str(out)}}, []
 
     if req.kind in ("captions", "track"):

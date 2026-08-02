@@ -4,13 +4,34 @@ import type { Highlight, ProjectState } from "../types";
 import { JobRunner } from "../components/JobRunner";
 import { SegmentPlayer } from "../components/SegmentPlayer";
 
+/** Export range for one highlight: hook-first cuts the hook moment in front of the
+ *  passage, otherwise the passage is widened to cover a hook that falls outside it. */
+const exportParams = (h: Highlight, rank: number, hookFirst: boolean) => {
+  const hasHook = h.hook_start_sec != null && h.hook_end_sec != null;
+  if (hookFirst && hasHook) {
+    return {
+      start_sec: h.start_sec,
+      end_sec: h.end_sec,
+      hook_start_sec: h.hook_start_sec,
+      hook_end_sec: h.hook_end_sec,
+      index: rank,
+    };
+  }
+  return {
+    start_sec: Math.min(h.start_sec, h.hook_start_sec ?? h.start_sec),
+    end_sec: Math.max(h.end_sec, h.hook_end_sec ?? h.end_sec),
+    index: rank,
+  };
+};
+
 const HighlightCard: React.FC<{
   highlight: Highlight;
   rank: number;
   videoUrl: string | null;
   projectId: string;
+  hookFirst: boolean;
   onExported: () => void;
-}> = ({ highlight: h, rank, videoUrl, projectId, onExported }) => (
+}> = ({ highlight: h, rank, videoUrl, projectId, hookFirst, onExported }) => (
   <div className="card hl-card">
     <div className="row" style={{ alignItems: "flex-start", gap: 16 }}>
       {videoUrl && (
@@ -53,11 +74,7 @@ const HighlightCard: React.FC<{
           <JobRunner
             kind="export_vertical"
             projectId={projectId}
-            params={{
-              start_sec: Math.min(h.start_sec, h.hook_start_sec ?? h.start_sec),
-              end_sec: Math.max(h.end_sec, h.hook_end_sec ?? h.end_sec),
-              index: rank,
-            }}
+            params={exportParams(h, rank, hookFirst)}
             label={h.vertical?.exists ? "Re-export vertical" : "Export vertical for DaVinci"}
             onDone={(done) => {
               if (done.state === "succeeded") onExported();
@@ -85,6 +102,7 @@ export const Highlights: React.FC<{
   const [minDuration, setMinDuration] = useState(20);
   const [maxDuration, setMaxDuration] = useState(110);
   const [geminiModel, setGeminiModel] = useState("gemini-flash-latest");
+  const [hookFirst, setHookFirst] = useState(true);
   const [highlights, setHighlights] = useState<Highlight[] | null>(null);
   const [keyPresent, setKeyPresent] = useState(true);
   const done = project.steps.highlights === "done";
@@ -112,7 +130,8 @@ export const Highlights: React.FC<{
         The timestamped transcript (text only — no audio or video) goes to Gemini, which suggests clip
         candidates with a hook moment and a virality score. Preview a candidate, then{" "}
         <strong>Export vertical</strong>: the speaker gets tracked and the clip comes out as a
-        1080×1920 ProRes ready for your DaVinci edit — B-roll lands in the final vertical frame.
+        1080×1920 file that opens with its hook, ready for your DaVinci edit — B-roll lands in the
+        final vertical frame.
       </p>
       {!keyPresent && (
         <p className="error">
@@ -176,6 +195,18 @@ export const Highlights: React.FC<{
               Next: Edit in Resolve →
             </button>
           </div>
+          <label
+            className="field"
+            style={{ flexDirection: "row", alignItems: "center", gap: 6, margin: "10px 0 4px" }}
+          >
+            <input
+              type="checkbox"
+              checked={hookFirst}
+              onChange={(e) => setHookFirst(e.target.checked)}
+            />
+            open with the hook — cut the hook moment in front of the passage (it then repeats in
+            context); turn off when the hook already is the opening line
+          </label>
           {highlights.map((h, i) => (
             <HighlightCard
               key={`${h.start_sec}-${i}`}
@@ -183,6 +214,7 @@ export const Highlights: React.FC<{
               rank={i + 1}
               videoUrl={videoUrl}
               projectId={project.id}
+              hookFirst={hookFirst}
               onExported={() => void loadHighlights()}
             />
           ))}
