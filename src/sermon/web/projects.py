@@ -14,7 +14,7 @@ from pathlib import Path
 from ..captions import APP_PUBLIC_DIR, load_cuts
 
 RECENTS_FILE = Path.home() / ".sermon" / "recents.json"
-RENDER_OUT_DIR = APP_PUBLIC_DIR.parent / "out"
+RENDER_OUT_DIR = APP_PUBLIC_DIR.parent / "out"  # legacy: renders used to land inside the repo
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".mkv", ".avi", ".mts", ".m2ts", ".webm"}
 
@@ -124,12 +124,50 @@ def artifact_paths(video: Path) -> dict[str, Path]:
     }
 
 
-def clip_state(project_id: str, clip: Path, probe: bool = True) -> dict:
+def output_dir(video: Path) -> Path:
+    """Where this project's finished renders go.
+
+    The sermon's own folder by default — everything else the pipeline produces
+    already lives beside the video, and renders used to land inside the repo
+    where nobody looks. A project may point somewhere else (see set_output_dir)."""
+    configured = _load_sidecar(video).get("output_dir")
+    if configured:
+        path = Path(configured).expanduser()
+        if path.is_dir():
+            return path
+    return video.resolve().parent
+
+
+def set_output_dir(video: Path, directory: Path) -> Path:
+    directory = directory.expanduser().resolve()
+    data = _load_sidecar(video)
+    data["output_dir"] = str(directory)
+    sidecar_path(video).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return directory
+
+
+def rendered_path(video: Path, clip: Path) -> Path:
+    """Where this clip's finished render is, or will be written.
+
+    New renders always go to the project's output folder, but an existing one is
+    still shown where it actually sits: renders predating this setting live in
+    captions/out, and pointing a project at a new folder must not make yesterday's
+    render look like it was never made."""
+    name = f"{clip.stem}.captioned.mp4"
+    target = output_dir(video) / name
+    previous = (video.resolve().parent / name, RENDER_OUT_DIR / name)
+    if target.is_file():
+        return target
+    return next((p for p in previous if p.is_file()), target)
+
+
+def clip_state(video: Path, clip: Path, probe: bool = True) -> dict:
     clip = clip.resolve()
+    project_id = path_id(video)
     captions_json = clip.parent / f"{clip.stem}.captions.json"
     framing_json = clip.parent / f"{clip.stem}.framing.json"
     public_video = APP_PUBLIC_DIR / clip.name
-    rendered = RENDER_OUT_DIR / f"{clip.stem}.captioned.mp4"
+    rendered = rendered_path(video, clip)
     in_public = public_video.is_file()
 
     # a render goes stale when any of its inputs (clip, captions, framing, caption
@@ -164,7 +202,9 @@ def clip_state(project_id: str, clip: Path, probe: bool = True) -> dict:
         },
         "urls": {
             "video": f"/media/app/{clip.name}" if in_public else None,
-            "rendered": f"/media/out/{rendered.name}" if rendered.is_file() else None,
+            # resolved server-side from the ids: the render may sit anywhere the
+            # project points, so there is no static mount to serve it from
+            "rendered": f"/media/render/{project_id}/{path_id(clip)}" if rendered.is_file() else None,
         },
     }
     state.update(_probe_safe(clip) if (probe and clip.is_file()) else {"duration_sec": None, "width": None, "height": None, "fps": None})
@@ -174,7 +214,7 @@ def clip_state(project_id: str, clip: Path, probe: bool = True) -> dict:
 def derive_state(video: Path, probe: bool = True) -> dict:
     video = video.resolve()
     arts = artifact_paths(video)
-    clips = [clip_state(path_id(video), Path(c), probe=probe) for c in _load_sidecar(video)["clips"]]
+    clips = [clip_state(video, Path(c), probe=probe) for c in _load_sidecar(video)["clips"]]
     steps = {
         "transcribe": "done" if arts["segments"].is_file() else "pending",
         "highlights": "done" if arts["highlights"].is_file() else "pending",
@@ -192,6 +232,7 @@ def derive_state(video: Path, probe: bool = True) -> dict:
             **(_probe_safe(video) if (probe and video.is_file()) else {}),
         },
         "artifacts": {name: _artifact(path) for name, path in arts.items()},
+        "output_dir": str(output_dir(video)),
         "clips": clips,
         "steps": steps,
     }

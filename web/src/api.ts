@@ -41,7 +41,7 @@ export const api = {
   geminiStatus: () => request<{ key_present: boolean }>("/api/gemini-status"),
   fsList: (path?: string) =>
     request<FsListing>(`/api/fs/list${path ? `?path=${encodeURIComponent(path)}` : ""}`),
-  pickFile: (kind: "video" | "clip") => post<{ path: string | null }>("/api/fs/pick", { kind }),
+  pickFile: (kind: "video" | "clip" | "folder") => post<{ path: string | null }>("/api/fs/pick", { kind }),
   createProject: (videoPath: string) => post<ProjectState>("/api/projects", { video_path: videoPath }),
   listProjects: () => request<{ projects: ProjectState[] }>("/api/projects"),
   getProject: (id: string) => request<ProjectState>(`/api/projects/${id}`),
@@ -54,6 +54,8 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ end_sec: endSec }),
     }),
+  setOutputDir: (id: string, path: string) =>
+    post<{ output_dir: string }>(`/api/projects/${id}/output-dir`, { path }),
   exportXml: (id: string) => post<{ xml_path: string }>(`/api/projects/${id}/export`, {}),
   addClip: (id: string, clipPath: string) =>
     post<ClipState>(`/api/projects/${id}/clips`, { clip_path: clipPath }),

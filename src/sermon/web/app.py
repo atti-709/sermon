@@ -21,11 +21,11 @@ def create_app() -> FastAPI:
     app.include_router(router, prefix="/api")
     app.include_router(media_router, prefix="/media")
 
+    # renders live wherever the project points (its own folder by default) and are
+    # served by /media/render/{project}/{clip}; only the Remotion app's own public/
+    # needs a static mount
     public_dir = REPO_ROOT / "captions" / "public"
-    out_dir = REPO_ROOT / "captions" / "out"
-    out_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/media/app", StaticFiles(directory=public_dir), name="media-app")
-    app.mount("/media/out", StaticFiles(directory=out_dir), name="media-out")
 
     if WEB_DIST.joinpath("index.html").is_file():
         app.mount("/", StaticFiles(directory=WEB_DIST, html=True), name="ui")

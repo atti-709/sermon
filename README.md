@@ -74,6 +74,12 @@ The preview step embeds the exact Remotion composition the final render uses
 (`captions/src/CaptionedClipCore.tsx`, shared with Remotion Studio) — click a caption
 word to fix a typo; edits land in the same `.captions.json` Studio and the render read.
 
+Finished renders are written next to the sermon as `<clip>.captioned.mp4`, alongside
+everything else the pipeline produces. The Render step's **Change…** button points a
+project somewhere else (an export drive, a Dropbox folder); the choice is remembered in
+`<stem>.project.json`. Renders made before this was configurable stay visible where they
+were, in `captions/out/`.
+
 For frontend development: `uv run sermon web --no-browser` in one terminal,
 `npm run dev` in `web/` in another (Vite proxies `/api` and `/media`).
 

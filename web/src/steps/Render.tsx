@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { api } from "../api";
 import type { ClipState, ProjectState } from "../types";
 import { JobRunner } from "../components/JobRunner";
@@ -7,7 +8,20 @@ export const Render: React.FC<{
   clip: ClipState;
   onRefresh: () => Promise<void>;
 }> = ({ project, clip, onRefresh }) => {
+  const [error, setError] = useState<string | null>(null);
   const stale = clip.rendered.exists && clip.rendered.stale;
+
+  const chooseOutputDir = async () => {
+    setError(null);
+    const { path } = await api.pickFile("folder");
+    if (!path) return; // dialog canceled
+    try {
+      await api.setOutputDir(project.id, path);
+      await onRefresh();
+    } catch (exc) {
+      setError((exc as Error).message);
+    }
+  };
   // cache-buster: same URL after a re-render would let the browser show the old file
   const renderedUrl = clip.urls.rendered
     ? `${clip.urls.rendered}?v=${clip.rendered.mtime ?? 0}`
@@ -20,6 +34,15 @@ export const Render: React.FC<{
         Remotion burns the captions and the tracked 9:16 crop into a 1080×1920 MP4 — ready for Reels,
         Shorts and TikTok. The render always reads the latest saved captions and tracking data.
       </p>
+      <div className="row" style={{ gap: 8, marginTop: 14, alignItems: "baseline" }}>
+        <span className="hint">saving to</span>
+        <strong className="mono" style={{ wordBreak: "break-all", flex: 1 }}>
+          {project.output_dir}
+        </strong>
+        <button onClick={() => void chooseOutputDir()}>Change…</button>
+        <button onClick={() => api.reveal(project.output_dir)}>Open</button>
+      </div>
+      {error && <p className="error">{error}</p>}
       {stale && (
         <div className="card stale-banner">
           <strong>This render is out of date.</strong> The captions or tracking data changed after it

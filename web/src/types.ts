@@ -37,6 +37,8 @@ export type ProjectState = {
     fps?: number | null;
   };
   artifacts: Record<"transcript" | "srt" | "segments" | "highlights" | "highlights_md" | "resolve_xml", Artifact>;
+  /** where finished renders are written — the sermon's own folder by default */
+  output_dir: string;
   clips: ClipState[];
   steps: Record<"transcribe" | "highlights" | "export" | "clips" | "captions" | "render", StepStatus>;
 };

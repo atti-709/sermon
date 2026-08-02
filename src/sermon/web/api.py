@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import subprocess
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -64,7 +65,8 @@ def fs_list(path: str | None = None) -> dict:
 
 
 class PickFileRequest(BaseModel):
-    kind: str = "video"  # video | clip — fixed prompts only, nothing user-supplied reaches AppleScript
+    # video | clip | folder — fixed prompts only, nothing user-supplied reaches AppleScript
+    kind: str = "video"
 
 
 @router.post("/fs/pick")
@@ -77,8 +79,10 @@ def pick_file(req: PickFileRequest) -> dict:
     prompt = {
         "video": "Choose a sermon video",
         "clip": "Choose a rendered clip from Resolve",
+        "folder": "Choose where finished videos should be saved",
     }.get(req.kind, "Choose a video")
-    script = f'POSIX path of (choose file with prompt "{prompt}")'
+    chooser = "choose folder" if req.kind == "folder" else "choose file"
+    script = f'POSIX path of ({chooser} with prompt "{prompt}")'
     try:
         proc = subprocess.run(
             ["osascript", "-e", "activate", "-e", script],
@@ -217,6 +221,22 @@ def update_highlight_end(project_id: str, index: int, req: HighlightEndRequest) 
     return {**highlight, "vertical": {"index": index, "path": str(out), "exists": out.is_file()}}
 
 
+class OutputDirRequest(BaseModel):
+    path: str
+
+
+@router.post("/projects/{project_id}/output-dir")
+def set_output_dir(project_id: str, req: OutputDirRequest) -> dict:
+    """Choose where this project's finished renders are written."""
+    video = _project_video(project_id)
+    directory = Path(req.path).expanduser()
+    if not directory.is_dir():
+        raise HTTPException(422, f"{directory} is not a folder")
+    if not os.access(directory, os.W_OK):
+        raise HTTPException(422, f"{directory} is not writable")
+    return {"output_dir": str(projects.set_output_dir(video, directory))}
+
+
 @router.post("/projects/{project_id}/export")
 def export_resolve_xml(project_id: str) -> dict:
     from ..export import export_timeline
@@ -256,12 +276,13 @@ def add_clip(project_id: str, req: ClipRequest) -> dict:
     if clip.suffix.lower() not in projects.VIDEO_EXTENSIONS:
         raise HTTPException(422, f"{clip.name} is not a supported video file")
     projects.register_clip(video, clip)
-    return projects.clip_state(project_id, clip)
+    return projects.clip_state(video, clip)
 
 
 @router.get("/projects/{project_id}/clips/{clip_id}")
 def get_clip(project_id: str, clip_id: str) -> dict:
-    return projects.clip_state(project_id, _project_clip(project_id, clip_id))
+    video = _project_video(project_id)
+    return projects.clip_state(video, _project_clip(project_id, clip_id))
 
 
 @router.get("/projects/{project_id}/clips/{clip_id}/captions")
@@ -406,11 +427,13 @@ def _build_job(req: JobRequest) -> tuple[list[str], Path, dict | None, list[Path
         return argv, repo_cwd, None, []
 
     if req.kind == "render":
+        video = _project_video(req.project_id)
         clip = _project_clip(req.project_id, req.clip_id)
         if not (APP_PUBLIC_DIR / clip.name).is_file() or not (APP_PUBLIC_DIR / f"{clip.stem}.captions.json").is_file():
             raise HTTPException(422, "clip is not in captions/public yet — run the captions step first")
-        projects.RENDER_OUT_DIR.mkdir(parents=True, exist_ok=True)
-        props_file = projects.RENDER_OUT_DIR / f".props-{uuid.uuid4().hex[:8]}.json"
+        out_path = projects.output_dir(video) / f"{clip.stem}.captioned.mp4"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        props_file = Path(tempfile.gettempdir()) / f"sermon-props-{uuid.uuid4().hex[:8]}.json"
         props = {
             "src": clip.name,
             "captions": None,
@@ -419,7 +442,6 @@ def _build_job(req: JobRequest) -> tuple[list[str], Path, dict | None, list[Path
             "cuts": projects.load_cuts(clip) or None,
         }
         props_file.write_text(json.dumps(props), encoding="utf-8")
-        out_path = projects.RENDER_OUT_DIR / f"{clip.stem}.captioned.mp4"
         argv = ["npx", "remotion", "render", "CaptionedClip", f"--props={props_file}", str(out_path)]
         return argv, APP_PUBLIC_DIR.parent, {"paths": {"output": str(out_path)}}, [props_file]
 
@@ -508,6 +530,18 @@ def reveal_in_finder(req: RevealRequest) -> dict:
 # --- project media (source video preview) ------------------------------------
 
 media_router = APIRouter()
+
+
+@media_router.get("/render/{project_id}/{clip_id}")
+def render_media(project_id: str, clip_id: str):
+    """The finished render, resolved from the ids — it may live outside any mount."""
+    from fastapi.responses import FileResponse
+
+    video = _project_video(project_id)
+    target = projects.rendered_path(video, _project_clip(project_id, clip_id))
+    if not target.is_file():
+        raise HTTPException(404, "not rendered yet")
+    return FileResponse(target)
 
 
 @media_router.get("/project/{project_id}/{filename}")
