@@ -167,8 +167,9 @@ a system stack takes over whenever the file is missing.
 
 One solver, two places to apply it. The **vertical export** (web UI, before the edit) runs it
 over the highlight's time window and bakes the moving crop into the exported clip — a single
-ffmpeg pass where the camera path drives a dynamic crop via `sendcmd`, scaled to 1080×1920 and
-encoded as hardware ProRes HQ. The **horizontal route** (after the edit) instead keeps the clip
+ffmpeg pass where a `perspective` filter slides the fractional crop quad with per-frame
+expressions (subpixel positions at the full frame rate; an integer `sendcmd` crop was visibly
+steppy), scaled to 1080×1920. The **horizontal route** (after the edit) instead keeps the clip
 in 16:9 and writes `<clip>.framing.json`, smoothed X offsets that the Remotion app applies per
 frame, so the crop moves at render time:
 

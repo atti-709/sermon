@@ -24,7 +24,7 @@ from .captions import APP_PUBLIC_DIR
 # ---------------------------------------------------------------------------
 # Tunables (units: fraction of source width, seconds)
 SAMPLE_HZ = 10.0  # detection rate; the camera path is solved at SOLVE_HZ regardless
-SOLVE_HZ = 25.0
+SOLVE_HZ = 50.0  # fine enough that per-frame sampling of the path stays kink-free
 DETECT_WIDTH = 960  # frames are decoded at this width for detection
 OUT_ASPECT = 9 / 16  # the vertical crop
 DEAD_ZONE = 0.058  # subject may drift this far from the crop center before a pan (~110 px @1920)
