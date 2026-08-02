@@ -6,6 +6,13 @@ import type { Caption, ClipState, Framing, ProjectState } from "../types";
 
 const FPS = 30;
 
+// served from captions/public — the same files Remotion Studio and the renderer
+// use, so the preview matches the render
+const FONT_URLS = [
+  { weight: 600, url: "/media/app/fonts/Aspekta-600.ttf" },
+  { weight: 400, url: "/media/app/fonts/Aspekta-400.ttf" },
+];
+
 /** index of the word being spoken at `tMs`, or -1 in the gaps between words */
 const activeCaptionIndex = (captions: Caption[], tMs: number): number => {
   let lo = 0;
@@ -187,7 +194,7 @@ export const Preview: React.FC<{
       captions,
       framing,
       yOffset,
-      fontUrl: "/media/app/fonts/Aspekta-600.ttf",
+      fontUrls: FONT_URLS,
       editable: true,
       onSaveCorrections: save,
     }),

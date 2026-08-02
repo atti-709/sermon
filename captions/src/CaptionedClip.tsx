@@ -7,7 +7,10 @@ import { CaptionedClipCore, type Framing } from "./CaptionedClipCore";
 // staticFile() and persists in-Studio word corrections straight into public/.
 // The sermon web app renders the core directly with its own URLs + save API.
 
-const FONT_FILE = "fonts/Aspekta-600.ttf";
+const FONT_FILES = [
+  { weight: 600, file: "fonts/Aspekta-600.ttf" },
+  { weight: 400, file: "fonts/Aspekta-400.ttf" },
+];
 
 export const captionsFileFor = (src: string) => src.replace(/\.[^.]+$/, "") + ".captions.json";
 export const framingFileFor = (src: string) => src.replace(/\.[^.]+$/, "") + ".framing.json";
@@ -31,7 +34,7 @@ export const CaptionedClip: React.FC<{
       captions={captions}
       framing={framing}
       yOffset={yOffset}
-      fontUrl={staticFile(FONT_FILE)}
+      fontUrls={FONT_FILES.map(({ weight, file }) => ({ weight, url: staticFile(file) }))}
       editable={editable}
       captureClicksForStudio={editable}
       onSaveCorrections={(updated) => {

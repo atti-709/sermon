@@ -7,8 +7,6 @@ import {
   OffthreadVideo,
   continueRender,
   delayRender,
-  interpolate,
-  spring,
   useCurrentFrame,
   useRemotionEnvironment,
   useVideoConfig,
@@ -24,7 +22,11 @@ import { buildPages, LINE_LEAD_MS } from "./layout";
 // Hard-coded caption style — tweak here, not via props.
 const FONT_FAMILY = "Aspekta";
 const FONT_FALLBACK = "'Arial Black', 'Helvetica Neue', sans-serif";
-const FONT_WEIGHT = 600;
+// the line being spoken carries the weight; lines already spoken stay fully
+// opaque but drop to regular, so the eye lands on the current one without a
+// fade doing the work
+const FONT_WEIGHT_CURRENT = 600;
+const FONT_WEIGHT_SPOKEN = 400;
 const FONT_SIZE = 64;
 const TEXT_TRANSFORM: React.CSSProperties["textTransform"] = "none";
 const TEXT_COLOR = "white";
@@ -34,8 +36,6 @@ const TEXT_COLOR = "white";
 const TEXT_SHADOW = "0 2px 6px rgba(0,0,0,0.42), 0 6px 28px rgba(0,0,0,0.5)";
 const BOTTOM_OFFSET = 640; // px from the bottom of the 1920px frame — keeps captions
 // above the Reels/TikTok/Shorts UI cluster (bottom ~25% of the screen)
-const LINE_POP_MS = 200; // entry animation length per line
-const DIMMED_LINE_OPACITY = 0.6; // a line fades to this once a later line starts
 // ---------------------------------------------------------------------------
 
 // `sermon track` output: where the 9:16 crop window should sit inside the source
@@ -90,8 +90,9 @@ export const CaptionedClipCore: React.FC<{
   /** px to lift the caption block above its default height (negative = lower);
    *  set per clip by the web app's caption-position slider */
   yOffset?: number | null;
-  /** full URL of the brand font; falls back to a system stack when missing */
-  fontUrl?: string | null;
+  /** full URL of each brand-font weight the style uses (600 for the current
+   *  line, 400 for spoken ones); falls back to a system stack when missing */
+  fontUrls?: { weight: number; url: string }[] | null;
   /** allow click-to-edit of caption words */
   editable?: boolean;
   /** Studio only: claim canvas clicks via window capture listeners (Studio's
@@ -104,7 +105,7 @@ export const CaptionedClipCore: React.FC<{
   captions: captionsFromProps,
   framing,
   yOffset,
-  fontUrl,
+  fontUrls,
   editable = false,
   captureClicksForStudio = false,
   onSaveCorrections,
@@ -119,21 +120,27 @@ export const CaptionedClipCore: React.FC<{
   const captions = edited?.src === videoSrc ? edited.captions : captionsFromProps;
 
   const [fontHandle] = useState(() => delayRender("loading brand font"));
+  // an inline array prop is a new object every frame — key the effect on content
+  const fontKey = JSON.stringify(fontUrls ?? []);
   useEffect(() => {
-    if (!fontUrl) {
+    const faces: { weight: number; url: string }[] = JSON.parse(fontKey);
+    if (faces.length === 0) {
       continueRender(fontHandle);
       return;
     }
-    // loadFont() cancels the render outright on a missing file, so probe first
-    fetch(fontUrl, { method: "HEAD" })
-      .then((r) =>
-        r.ok
-          ? loadFont({ family: FONT_FAMILY, url: fontUrl })
-          : console.warn(`${fontUrl} not found — using fallback font`),
-      )
-      .catch(() => console.warn(`${fontUrl} not reachable — using fallback font`))
-      .finally(() => continueRender(fontHandle));
-  }, [fontHandle, fontUrl]);
+    Promise.all(
+      faces.map((face) =>
+        // loadFont() cancels the render outright on a missing file, so probe first
+        fetch(face.url, { method: "HEAD" })
+          .then((r) =>
+            r.ok
+              ? loadFont({ family: FONT_FAMILY, url: face.url, weight: String(face.weight) })
+              : console.warn(`${face.url} not found — using fallback font`),
+          )
+          .catch(() => console.warn(`${face.url} not reachable — using fallback font`)),
+      ),
+    ).finally(() => continueRender(fontHandle));
+  }, [fontHandle, fontKey]);
 
   const pages = useMemo(() => (captions ? buildPages(captions) : []), [captions]);
 
@@ -209,7 +216,6 @@ export const CaptionedClipCore: React.FC<{
               textAlign: "center",
               fontFamily: `${FONT_FAMILY}, ${FONT_FALLBACK}`,
               fontSize: FONT_SIZE,
-              fontWeight: FONT_WEIGHT,
               lineHeight: 1.2,
               textTransform: TEXT_TRANSFORM,
               color: TEXT_COLOR,
@@ -217,34 +223,23 @@ export const CaptionedClipCore: React.FC<{
             }}
           >
             {page.lines.map((line, lineIndex) => {
-              // whole-line reveal: a line pops in as one unit slightly before
-              // its first word is spoken (reading outruns listening); once a
-              // later line starts, this one de-emphasizes
+              // whole-line reveal: a line appears as one unit slightly before
+              // its first word is spoken (reading outruns listening). No entry
+              // animation — a hard cut on, deliberately. Lines still to come are
+              // hidden rather than unmounted, so the block never reflows; once a
+              // later line starts, this one drops to the regular weight.
               const lineStart = Math.max(0, line[0].fromMs - LINE_LEAD_MS);
               const started = timeMs >= lineStart;
               const laterLineStarted = page.lines.some(
                 (other, otherIndex) =>
                   otherIndex > lineIndex && timeMs >= Math.max(0, other[0].fromMs - LINE_LEAD_MS),
               );
-              const progress = spring({
-                frame,
-                fps,
-                delay: (lineStart / 1000) * fps,
-                durationInFrames: (LINE_POP_MS / 1000) * fps,
-                config: { damping: 200 },
-              });
-              // while editing, not-yet-spoken lines stay faintly visible so
-              // their words can be clicked and corrected; renders keep them hidden
-              const ghost = editable && !started;
               return (
                 <div
                   key={lineIndex}
                   style={{
-                    visibility: started || ghost ? "visible" : "hidden",
-                    opacity: ghost ? 0.3 : progress * (laterLineStarted ? DIMMED_LINE_OPACITY : 1),
-                    transform: ghost
-                      ? undefined
-                      : `translateY(${interpolate(progress, [0, 1], [14, 0])}px)`,
+                    visibility: started ? "visible" : "hidden",
+                    fontWeight: laterLineStarted ? FONT_WEIGHT_SPOKEN : FONT_WEIGHT_CURRENT,
                   }}
                 >
                   {line.map((token, i) => {
