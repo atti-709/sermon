@@ -185,8 +185,12 @@ Either way the camera behaves the same:
 - The virtual camera behaves like a calm operator, not like OpusClip's jitter: it **holds
   still** (~80 % of the time) while the speaker stays inside a dead zone, ignores brief
   excursions that return within a few seconds, and otherwise **pans once, smoothly**
-  (minimum-jerk, ≈1-3 s) to where the speaker is about to settle — it never whips back
-  mid-pan, and it uses lookahead, so pans lead the subject instead of trailing it.
+  (minimum-jerk, ≈1-3 s) to where the speaker is about to settle — and it never whips back
+  mid-pan.
+- Pans **react, they don't anticipate**: a pan only launches after the drift has been
+  visible for a human beat (~0.35 s; ~0.15 s startle-reflex when the speaker is striding
+  out fast, judged from observed speed, never from future frames). Look-ahead is used only
+  to choose where the pan lands, so the camera trails the way a real operator does.
 - Hard cuts (e.g. the hook) are detected via ffmpeg scene scores but only honored when the
   subject position actually jumps across them — the camera then snaps exactly at the cut
   instead of gliding. LED-wall slide changes behind the speaker are ignored.

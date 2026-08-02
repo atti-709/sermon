@@ -30,9 +30,13 @@ OUT_ASPECT = 9 / 16  # the vertical crop
 DEAD_ZONE = 0.058  # subject may drift this far from the crop center before a pan (~110 px @1920)
 CONFIRM_SEC = 0.9  # subject must stay outside the dead zone this long to trigger a pan
 CONFIRM_FRAC = 0.85  # ...for at least this fraction of the confirm window
+REACTION_SEC = 0.35  # ...and must have already been drifting this long before the pan
+# launches — a human operator reacts to movement they have seen, they don't anticipate it
+REACTION_EMERGENCY_SEC = 0.15  # sudden big moves get the startle-reflex reaction instead
 EXCURSION_WIN_SEC = 3.5  # brief excursions that return within this window are not followed...
 EXCURSION_MIN_FRAC = 0.45  # ...unless the subject spends this fraction of it outside the zone
-EMERGENCY_FACTOR = 1.8  # but always follow once the subject strays this far (x dead zone)
+EMERGENCY_SPEED = 0.10  # but follow right away when the subject is outside the dead zone and
+# observed moving away faster than this (width/s) — inferred from the past, not the future
 MIN_HOLD_SEC = 0.6  # a completed pan is followed by at least this much stillness
 PAN_SEC_BASE, PAN_SEC_PER_DIST = 0.5, 4.5  # pan duration = base + dist * per_dist
 PAN_SEC_MIN, PAN_SEC_MAX = 1.1, 2.8
@@ -269,6 +273,8 @@ def _solve_camera(t_grid: np.ndarray, subject: np.ndarray, cuts: list[float],
     pan_sec = lambda dist: float(np.clip(PAN_SEC_BASE + PAN_SEC_PER_DIST * dist, PAN_SEC_MIN, PAN_SEC_MAX))
     confirm_n = max(1, int(round(CONFIRM_SEC * SOLVE_HZ)))
     excursion_n = max(1, int(round(EXCURSION_WIN_SEC * SOLVE_HZ)))
+    react_n = max(1, int(round(REACTION_SEC * SOLVE_HZ)))
+    react_fast_n = max(1, int(round(REACTION_EMERGENCY_SEC * SOLVE_HZ)))
     camera = np.empty_like(subject)
 
     bounds = [0.0, *cuts, t_grid[-1] + dt]
@@ -296,16 +302,25 @@ def _solve_camera(t_grid: np.ndarray, subject: np.ndarray, cuts: list[float],
             if not panning:
                 hold_for += dt
                 win = s[k: min(k + confirm_n, n)]
-                off = np.abs(win - x)
-                frac_out = float(np.mean(off > DEAD_ZONE))
+                frac_out = float(np.mean(np.abs(win - x) > DEAD_ZONE))
                 # brief excursions that come right back are ignored; the long window decides
                 frac_out_long = float(np.mean(np.abs(s[k: min(k + excursion_n, n)] - x) > DEAD_ZONE))
-                emergency = float(off.max()) > EMERGENCY_FACTOR * DEAD_ZONE and abs(s[k] - x) > DEAD_ZONE
                 settled = frac_out >= CONFIRM_FRAC and frac_out_long >= EXCURSION_MIN_FRAC
-                if hold_for >= MIN_HOLD_SEC and abs(s[k] - x) > 0.6 * DEAD_ZONE and (settled or emergency):
+                # a sharp operator reads speed off the subject: outside the zone and
+                # visibly striding away -> chase now, don't wait out the confirm window
+                v_obs = (s[k] - s[k - react_fast_n]) / REACTION_EMERGENCY_SEC if k >= react_fast_n else 0.0
+                emergency = abs(s[k] - x) > DEAD_ZONE and v_obs * np.sign(s[k] - x) > EMERGENCY_SPEED
+                # the drift must have been visible for a moment already: pans react, never anticipate
+                def seen_for(steps: int) -> bool:
+                    recent = s[max(0, k - steps): k + 1]
+                    return k >= steps and float(np.mean(np.abs(recent - x) > 0.6 * DEAD_ZONE)) >= 0.7
+
+                ready = (settled and seen_for(react_n)) or (emergency and seen_for(react_fast_n))
+                if hold_for >= MIN_HOLD_SEC and abs(s[k] - x) > 0.6 * DEAD_ZONE and ready:
                     target = pan_target(k)
                     if abs(target - x) > 0.4 * DEAD_ZONE:
-                        pan_T = pan_sec(abs(target - x))
+                        # catch-up whips are brisker: the subject is escaping the frame
+                        pan_T = pan_sec(abs(target - x)) * (0.72 if emergency else 1.0)
                         poly = _quintic(x, v, a, target, pan_T)
                         tau, since_replan, panning = 0.0, 0.0, True
             else:
