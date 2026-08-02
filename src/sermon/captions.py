@@ -176,13 +176,48 @@ def proofread_captions(captions: list[dict], gemini_model: str) -> list[tuple[in
     return applied
 
 
+# codecs Chrome can decode — anything else (ProRes DaVinci masters, DNxHD…) must
+# be transcoded on the way into captions/public/, or the web preview and the
+# WebCodecs-based render both get a video they cannot read
+WEB_SAFE_CODECS = frozenset({"h264", "hevc", "vp9", "av1"})
+
+
+def _video_codec(video: Path) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(video)],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+
+
+def _copy_web_safe(video: Path, app_path: Path) -> None:
+    """Copy the clip into captions/public, transcoding to high-bitrate h264 when
+    the source codec is not browser-decodable. 30 Mbps hardware h264 is visually
+    transparent as a render source (the final export is ~8 Mbps anyway)."""
+    import subprocess
+
+    codec = _video_codec(video)
+    if codec in WEB_SAFE_CODECS:
+        shutil.copy2(video, app_path)
+        return
+    print(f"  {codec} is not browser-playable — transcoding the preview/render copy to h264…")
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y", "-i", str(video),
+         "-c:v", "h264_videotoolbox", "-b:v", "30M",
+         "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", str(app_path)],
+        check=True, capture_output=True, text=True,
+    )
+
+
 def write_captions(captions: list[dict], video: Path, copy_to_app: bool = True) -> dict[str, Path]:
     json_path = video.resolve().parent / f"{video.stem}.captions.json"
     json_path.write_text(json.dumps(captions, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     paths = {"captions": json_path}
 
     if copy_to_app and APP_PUBLIC_DIR.is_dir():
-        shutil.copy2(video, APP_PUBLIC_DIR / video.name)
+        _copy_web_safe(video, APP_PUBLIC_DIR / video.name)
         shutil.copy2(json_path, APP_PUBLIC_DIR / json_path.name)
         # caption position, if this clip already has one — the composition reads it
         # from public/ too, and a re-run must not silently reset the clip's style
