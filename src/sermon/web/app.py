@@ -38,6 +38,9 @@ app = create_app()
 def _find_free_port(start: int) -> int:
     for port in range(start, start + 11):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            # match uvicorn's own bind flags, or a just-restarted server drifts
+            # to the next port while the browser still points at the old one
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 sock.bind(("127.0.0.1", port))
             except OSError:
