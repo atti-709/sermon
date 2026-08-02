@@ -1,19 +1,43 @@
 import { Player, PlayerRef } from "@remotion/player";
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CaptionedClipCore } from "@captions/CaptionedClipCore";
 import { api } from "../api";
 import type { Caption, ClipState, Framing, ProjectState } from "../types";
 
 const FPS = 30;
 
+/** index of the word being spoken at `tMs`, or -1 in the gaps between words */
+const activeCaptionIndex = (captions: Caption[], tMs: number): number => {
+  let lo = 0;
+  let hi = captions.length - 1;
+  let started = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (captions[mid].startMs <= tMs) {
+      started = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return started !== -1 && tMs < captions[started].endMs + 150 ? started : -1;
+};
+
 /** Full transcript with every word editable — click a word to fix it (the
- *  player seeks along), Enter saves, Esc cancels. */
-const CaptionEditor: React.FC<{
+ *  player seeks along), Enter saves, Esc cancels. Memoized on the active word
+ *  rather than the playhead: re-reconciling every word span 30x a second is
+ *  enough main-thread work to stutter playback. */
+const CaptionEditor = memo(function CaptionEditor({
+  captions,
+  activeIndex,
+  onSeek,
+  onSave,
+}: {
   captions: Caption[];
-  currentTimeMs: number;
+  activeIndex: number;
   onSeek: (ms: number) => void;
   onSave: (updated: Caption[]) => void;
-}> = ({ captions, currentTimeMs, onSeek, onSave }) => {
+}) {
   const [editing, setEditing] = useState<number | null>(null);
 
   const commit = (index: number, value: string) => {
@@ -42,7 +66,7 @@ const CaptionEditor: React.FC<{
             />
           );
         }
-        const active = currentTimeMs >= caption.startMs && currentTimeMs < caption.endMs + 150;
+        const active = index === activeIndex;
         return (
           <span
             key={index}
@@ -58,7 +82,7 @@ const CaptionEditor: React.FC<{
       })}
     </div>
   );
-};
+});
 
 export const Preview: React.FC<{
   project: ProjectState;
@@ -69,7 +93,7 @@ export const Preview: React.FC<{
   const [framing, setFraming] = useState<Framing | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
-  const [currentTimeMs, setCurrentTimeMs] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(-1);
   const playerRef = useRef<PlayerRef>(null);
   const saveTimer = useRef<number | null>(null);
 
@@ -86,31 +110,55 @@ export const Preview: React.FC<{
       .catch(() => setFraming(null)); // framing is optional — centered crop without it
   }, [project.id, clip.id]);
 
-  // follow playback so the transcript highlights the spoken word
+  // follow playback so the transcript highlights the spoken word. `frameupdate`
+  // fires every frame; storing the word index instead of the playhead keeps this
+  // to ~3 re-renders a second (React bails out when the index is unchanged).
   useEffect(() => {
     const player = playerRef.current;
-    if (!player) return;
+    if (!player || !captions) return;
     const onFrame = (e: { detail: { frame: number } }) =>
-      setCurrentTimeMs(Math.round((e.detail.frame / FPS) * 1000));
+      setActiveIndex(activeCaptionIndex(captions, (e.detail.frame / FPS) * 1000));
     player.addEventListener("frameupdate", onFrame);
     return () => player.removeEventListener("frameupdate", onFrame);
   }, [captions]);
 
-  const save = (updated: Caption[]) => {
-    setCaptions(updated);
-    setSaveState("saving");
-    api
-      .putCaptions(project.id, clip.id, updated)
-      .then(() => {
-        setSaveState("saved");
-        if (saveTimer.current) window.clearTimeout(saveTimer.current);
-        saveTimer.current = window.setTimeout(() => setSaveState("idle"), 2000);
-      })
-      .catch((exc) => {
-        setSaveState("error");
-        setError(exc.message);
-      });
-  };
+  const save = useCallback(
+    (updated: Caption[]) => {
+      setCaptions(updated);
+      setSaveState("saving");
+      api
+        .putCaptions(project.id, clip.id, updated)
+        .then(() => {
+          setSaveState("saved");
+          if (saveTimer.current) window.clearTimeout(saveTimer.current);
+          saveTimer.current = window.setTimeout(() => setSaveState("idle"), 2000);
+        })
+        .catch((exc) => {
+          setSaveState("error");
+          setError(exc.message);
+        });
+    },
+    [project.id, clip.id],
+  );
+
+  const seekToMs = useCallback(
+    (ms: number) => playerRef.current?.seekTo(Math.round((ms / 1000) * FPS)),
+    [],
+  );
+
+  // a fresh object here would re-render the whole composition on every parent
+  // render — including once per frame while the transcript follows playback
+  const inputProps = useMemo(
+    () => ({
+      videoSrc: clip.urls.video ?? "",
+      captions,
+      framing,
+      fontUrl: "/media/app/fonts/Aspekta-600.ttf",
+      editable: true,
+      onSaveCorrections: save,
+    }),
+    [clip.urls.video, captions, framing, save],
+  );
 
   if (error)
     return (
@@ -143,14 +191,7 @@ export const Preview: React.FC<{
           fps={FPS}
           compositionWidth={1080}
           compositionHeight={1920}
-          inputProps={{
-            videoSrc: clip.urls.video,
-            captions,
-            framing,
-            fontUrl: "/media/app/fonts/Aspekta-600.ttf",
-            editable: true,
-            onSaveCorrections: save,
-          }}
+          inputProps={inputProps}
           controls
           style={{ width: 330, borderRadius: 12, overflow: "hidden", flexShrink: 0 }}
         />
@@ -168,8 +209,8 @@ export const Preview: React.FC<{
           </p>
           <CaptionEditor
             captions={captions}
-            currentTimeMs={currentTimeMs}
-            onSeek={(ms) => playerRef.current?.seekTo(Math.round((ms / 1000) * FPS))}
+            activeIndex={activeIndex}
+            onSeek={seekToMs}
             onSave={save}
           />
           <div className="row" style={{ marginTop: 14, justifyContent: "flex-end" }}>

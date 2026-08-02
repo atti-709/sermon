@@ -109,10 +109,13 @@ cd captions && npm run studio              # preview; renders via the Studio ren
 npx remotion render CaptionedClip --props='{"src":"rendered_clip.mp4","captions":null}' out/final.mp4
 ```
 
-Renders use VideoToolbox hardware encoding (`remotion.config.ts`), so a 90-second clip encodes
-on the GPU at ~8 Mbps instead of x264 crf 18 — same file size, about 15% less wall clock and
-half the CPU time. The rest of the render is Chromium rasterizing the captions, which no
-encoder flag speeds up.
+Renders lean on Apple Silicon at both ends: VideoToolbox h264 encoding (`remotion.config.ts`,
+~8 Mbps — hardware encoders ignore crf, so quality is pinned by bitrate) and WebCodecs
+decoding via `<Video>` from `@remotion/media`, which replaces `<OffthreadVideo>`'s
+ffmpeg-per-frame extraction while rendering. Together they take a 90-second clip from ~110s to
+~62s, and the render time stops fluctuating run to run. Studio and the web app's `<Player>`
+keep `<OffthreadVideo>`, which scrubs better; the two agree on framing and colour, and differ
+only in which of two adjacent source frames a 50 → 30 fps output frame samples (20 ms).
 
 `sermon captions` writes `<clip>.captions.json` (one entry per word) next to the clip and
 copies both into `captions/public/`. The caption style is hard-coded in

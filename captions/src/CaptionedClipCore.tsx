@@ -72,7 +72,7 @@ const framingCxAt = (keyframes: Framing["keyframes"], tSec: number): number => {
 const ClipVideo: React.FC<{ src: string; objectPosition: string }> = ({ src, objectPosition }) => {
   const { isRendering } = useRemotionEnvironment();
   const style = { width: "100%", height: "100%", objectPosition };
-  return isRendering && process.env.REMOTION_FORCE_OFFTHREAD !== "1" ? (
+  return isRendering ? (
     <Video src={src} objectFit="cover" style={style} />
   ) : (
     <OffthreadVideo src={src} style={{ ...style, objectFit: "cover" }} />
