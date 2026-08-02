@@ -50,7 +50,7 @@ export const Root: React.FC = () => {
       id="CaptionedClip"
       component={CaptionedClip}
       schema={schema}
-      defaultProps={{"src":"2 Miro Toth_short highlights.mov","captions":null,"framing":null}}
+      defaultProps={{"src":"clip.mov","captions":null,"framing":null}}
       durationInFrames={30 * 10}
       fps={FPS}
       width={1080}
