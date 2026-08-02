@@ -51,11 +51,14 @@ SELECTION GUIDELINES — what performs for sermon clips on Reels/Shorts/TikTok:
 - emotional peaks perform: laughter, vulnerability, conviction, comfort
 - prefer clips that end on a "screenshot sentence" — the line people quote in their captions
 
-Duration rules — shorter is better:
+Duration rules — most clips must be SHORT, and the set must vary:
 - cut at the first natural endpoint after the core message lands; do not pad
-- target 30-90 seconds
-- hard maximum {max_duration} seconds: exceed 90 only when the thought genuinely cannot close earlier
-- minimum {min_duration} seconds
+- most of the set is short: at least two thirds of the clips 25-50 seconds
+- the rest may run 60-{max_duration} seconds, but only where a story or build genuinely
+  needs the room — a long clip has to earn every second past 50
+- do not return a set that is uniformly long; the average across all clips should sit
+  near 45 seconds
+- hard maximum {max_duration} seconds, minimum {min_duration} seconds
 
 For each highlight also pick a HOOK: the single most attention-grabbing moment of roughly 3-10 seconds
 from within the clip — a bold claim, a provocative question, or an emotional line that works with zero
@@ -88,8 +91,8 @@ def parse_timestamp(value: str) -> float:
 def select_highlights(
     segments: list[dict],
     count: int = 8,
-    min_duration: int = 30,
-    max_duration: int = 90,
+    min_duration: int = 20,
+    max_duration: int = 100,
     gemini_model: str = DEFAULT_GEMINI_MODEL,
 ) -> list[dict]:
     from google import genai  # deferred so transcribe-only runs don't need it configured

@@ -20,14 +20,18 @@ const Segment: React.FC<{ src: string; fromSec: number }> = ({ src, fromSec }) =
 };
 
 /** Remotion Player over a highlight's range of the source sermon, with
- *  hook/full play buttons that stop at their range end. */
+ *  hook/full play buttons that stop at their range end. The player is exactly
+ *  as long as the clip that would be exported — moving the out point grows or
+ *  shrinks the preview with it. */
 export const SegmentPlayer: React.FC<{
   videoUrl: string;
   startSec: number;
   endSec: number;
   hookStartSec?: number | null;
   hookEndSec?: number | null;
-}> = ({ videoUrl, startSec, endSec, hookStartSec, hookEndSec }) => {
+  /** receives an absolute source timestamp when the ✂ button is pressed */
+  onSetEnd?: (sec: number) => void;
+}> = ({ videoUrl, startSec, endSec, hookStartSec, hookEndSec, onSetEnd }) => {
   const ref = useRef<PlayerRef>(null);
   const stopFrame = useRef<number | null>(null);
   const durationInFrames = Math.max(1, Math.ceil((endSec - startSec) * FPS));
@@ -77,6 +81,22 @@ export const SegmentPlayer: React.FC<{
         <button onClick={() => playRange(startSec, endSec)}>
           ▶ full · {fmtTime(endSec - startSec)}
         </button>
+        {onSetEnd && (
+          <>
+            <button onClick={() => playRange(Math.max(startSec, endSec - 4), endSec)}>
+              ▶ ending
+            </button>
+            <button
+              title="end the clip at the current playhead"
+              onClick={() => {
+                const frame = ref.current?.getCurrentFrame();
+                if (frame != null) onSetEnd(startSec + frame / FPS);
+              }}
+            >
+              ✂ end here
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

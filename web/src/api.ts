@@ -5,6 +5,7 @@ import type {
   CorrectionsFile,
   Framing,
   FsListing,
+  Highlight,
   HighlightsFile,
   JobDone,
   JobKind,
@@ -46,6 +47,13 @@ export const api = {
   getProject: (id: string) => request<ProjectState>(`/api/projects/${id}`),
   transcript: (id: string) => request<SegmentsFile>(`/api/projects/${id}/transcript`),
   highlights: (id: string) => request<HighlightsFile>(`/api/projects/${id}/highlights`),
+  /** move a highlight's out point (1-based rank) — rewrites the highlights file */
+  setHighlightEnd: (id: string, index: number, endSec: number) =>
+    request<Highlight>(`/api/projects/${id}/highlights/${index}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ end_sec: endSec }),
+    }),
   exportXml: (id: string) => post<{ xml_path: string }>(`/api/projects/${id}/export`, {}),
   addClip: (id: string, clipPath: string) =>
     post<ClipState>(`/api/projects/${id}/clips`, { clip_path: clipPath }),

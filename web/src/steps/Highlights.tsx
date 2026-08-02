@@ -1,17 +1,28 @@
-import { useEffect, useState } from "react";
-import { api } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { api, fmtTime } from "../api";
 import type { Highlight, ProjectState } from "../types";
 import { JobRunner } from "../components/JobRunner";
 import { SegmentPlayer } from "../components/SegmentPlayer";
 
+/** how far the out point may be dragged, as seconds from the highlight's start */
+const MIN_CLIP_SEC = 10;
+const MAX_CLIP_SEC = 200;
+
+/** HH:MM:SS, matching the timestamps the highlights file carries */
+const fmtClock = (sec: number): string => {
+  const s = Math.max(0, Math.floor(sec));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
+};
+
 /** Export range for one highlight: hook-first cuts the hook moment in front of the
  *  passage, otherwise the passage is widened to cover a hook that falls outside it. */
-const exportParams = (h: Highlight, rank: number, hookFirst: boolean) => {
+const exportParams = (h: Highlight, rank: number, hookFirst: boolean, endSec: number) => {
   const hasHook = h.hook_start_sec != null && h.hook_end_sec != null;
   if (hookFirst && hasHook) {
     return {
       start_sec: h.start_sec,
-      end_sec: h.end_sec,
+      end_sec: endSec,
       hook_start_sec: h.hook_start_sec,
       hook_end_sec: h.hook_end_sec,
       index: rank,
@@ -19,7 +30,7 @@ const exportParams = (h: Highlight, rank: number, hookFirst: boolean) => {
   }
   return {
     start_sec: Math.min(h.start_sec, h.hook_start_sec ?? h.start_sec),
-    end_sec: Math.max(h.end_sec, h.hook_end_sec ?? h.end_sec),
+    end_sec: Math.max(endSec, h.hook_end_sec ?? endSec),
     index: rank,
   };
 };
@@ -28,19 +39,51 @@ const HighlightCard: React.FC<{
   highlight: Highlight;
   rank: number;
   videoUrl: string | null;
+  videoDuration: number | null;
   projectId: string;
   hookFirst: boolean;
+  maxDuration: number;
   onExported: () => void;
-}> = ({ highlight: h, rank, videoUrl, projectId, hookFirst, onExported }) => (
+}> = ({ highlight: h, rank, videoUrl, videoDuration, projectId, hookFirst, maxDuration, onExported }) => {
+  // the out point is edited here and saved back into the highlights file, so the
+  // export, the Resolve XML and the notes all follow it
+  const [endSec, setEndSec] = useState(h.end_sec);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const saveTimer = useRef<number | null>(null);
+
+  const maxEnd = Math.min(videoDuration ?? h.end_sec + 60, h.start_sec + MAX_CLIP_SEC);
+  const minEnd = Math.min(h.start_sec + MIN_CLIP_SEC, maxEnd);
+
+  const changeEnd = (value: number) => {
+    const clamped = Math.min(Math.max(value, minEnd), maxEnd);
+    setEndSec(clamped);
+    setSaveState("saving");
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      api
+        .setHighlightEnd(projectId, rank, clamped)
+        .then((updated) => {
+          setEndSec(updated.end_sec); // the server clamps to the video's length
+          setSaveState("saved");
+        })
+        .catch(() => setSaveState("error"));
+    }, 400);
+  };
+
+  const duration = endSec - h.start_sec;
+  const trimmed = Math.abs(endSec - h.end_sec) >= 0.5;
+
+  return (
   <div className="card hl-card">
     <div className="row" style={{ alignItems: "flex-start", gap: 16 }}>
       {videoUrl && (
         <SegmentPlayer
           videoUrl={videoUrl}
           startSec={h.start_sec}
-          endSec={h.end_sec}
+          endSec={endSec}
           hookStartSec={h.hook_start_sec}
           hookEndSec={h.hook_end_sec}
+          onSetEnd={changeEnd}
         />
       )}
       <div style={{ flex: 1, minWidth: 260 }}>
@@ -50,7 +93,8 @@ const HighlightCard: React.FC<{
               {rank}. {h.title}
             </strong>
             <div className="hint mono">
-              {h.start} → {h.end} · {Math.round(h.duration_sec)}s (hook {h.hook_start} → {h.hook_end})
+              {h.start} → {fmtClock(endSec)} · {Math.round(duration)}s (hook {h.hook_start} →{" "}
+              {h.hook_end})
             </div>
           </div>
           <div style={{ textAlign: "right" }}>
@@ -70,11 +114,47 @@ const HighlightCard: React.FC<{
           <p>{h.excerpt}</p>
           <p className="hint">{h.score_reason}</p>
         </details>
+        <div className="end-trim">
+          <label className="field" style={{ flex: 1, minWidth: 220 }}>
+            <span style={{ display: "flex", justifyContent: "space-between" }}>
+              <span>
+                ends at <span className="mono">{fmtClock(endSec)}</span>
+                {trimmed && <span className="hint"> (was {h.end})</span>}
+              </span>
+              <span
+                className="mono"
+                style={{ color: duration > maxDuration ? "var(--accent)" : undefined }}
+              >
+                {fmtTime(duration)}
+              </span>
+            </span>
+            <input
+              type="range"
+              min={minEnd}
+              max={maxEnd}
+              step={0.5}
+              value={endSec}
+              onChange={(e) => changeEnd(Number(e.target.value))}
+            />
+          </label>
+          <div className="row" style={{ gap: 4 }}>
+            {[-5, -1, 1, 5].map((delta) => (
+              <button key={delta} onClick={() => changeEnd(endSec + delta)}>
+                {delta > 0 ? `+${delta}s` : `${delta}s`}
+              </button>
+            ))}
+            <span className="hint" style={{ minWidth: 54 }}>
+              {saveState === "saving" && "saving…"}
+              {saveState === "saved" && "✓ saved"}
+              {saveState === "error" && <span className="error">save failed</span>}
+            </span>
+          </div>
+        </div>
         <div style={{ marginTop: 12 }}>
           <JobRunner
             kind="export_vertical"
             projectId={projectId}
-            params={exportParams(h, rank, hookFirst)}
+            params={exportParams(h, rank, hookFirst, endSec)}
             label={h.vertical?.exists ? "Re-export vertical" : "Export vertical for DaVinci"}
             onDone={(done) => {
               if (done.state === "succeeded") onExported();
@@ -91,7 +171,8 @@ const HighlightCard: React.FC<{
       </div>
     </div>
   </div>
-);
+  );
+};
 
 export const Highlights: React.FC<{
   project: ProjectState;
@@ -100,7 +181,7 @@ export const Highlights: React.FC<{
 }> = ({ project, onRefresh, onNext }) => {
   const [count, setCount] = useState(8);
   const [minDuration, setMinDuration] = useState(20);
-  const [maxDuration, setMaxDuration] = useState(110);
+  const [maxDuration, setMaxDuration] = useState(100);
   const [geminiModel, setGeminiModel] = useState("gemini-flash-latest");
   const [hookFirst, setHookFirst] = useState(true);
   const [highlights, setHighlights] = useState<Highlight[] | null>(null);
@@ -213,8 +294,10 @@ export const Highlights: React.FC<{
               highlight={h}
               rank={i + 1}
               videoUrl={videoUrl}
+              videoDuration={project.video.duration_sec ?? null}
               projectId={project.id}
               hookFirst={hookFirst}
+              maxDuration={maxDuration}
               onExported={() => void loadHighlights()}
             />
           ))}

@@ -195,6 +195,16 @@ label.field {
   color: var(--text-dim);
 }
 
+.end-trim {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
 /* --- log pane / progress --- */
 .log-pane {
   background: var(--bg-inset);

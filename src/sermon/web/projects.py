@@ -77,6 +77,10 @@ def _probe_safe(video: Path) -> dict:
         return {"duration_sec": None, "width": None, "height": None, "fps": None}
 
 
+def video_duration(video: Path) -> float | None:
+    return _probe_safe(video)["duration_sec"]
+
+
 def _artifact(path: Path) -> dict:
     exists = path.is_file()
     return {

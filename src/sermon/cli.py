@@ -115,8 +115,8 @@ def _add_highlight_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--max-duration",
         type=int,
-        default=110,
-        help="hard cap on clip length in seconds; the prompt targets 30-90 s regardless (default: 110)",
+        default=100,
+        help="hard cap on clip length in seconds; most clips come back at 25-50 s regardless (default: 100)",
     )
     p.add_argument(
         "--gemini-model",

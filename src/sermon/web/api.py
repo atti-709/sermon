@@ -159,6 +159,64 @@ def get_highlights(project_id: str) -> dict:
     return data
 
 
+class HighlightEndRequest(BaseModel):
+    end_sec: float
+
+
+MIN_HIGHLIGHT_SEC = 5.0
+
+
+@router.patch("/projects/{project_id}/highlights/{index}")
+def update_highlight_end(project_id: str, index: int, req: HighlightEndRequest) -> dict:
+    """Move one highlight's out point (1-based index, as ranked in the file).
+
+    Gemini picks the end from the transcript alone, so it regularly lands a beat
+    early or late; the length is really only judgeable while watching. Rewriting
+    the highlights file means the vertical export, the Resolve XML and the
+    markdown notes all follow one edit."""
+    from ..highlights import write_highlights
+    from ..transcribe import format_timestamp
+
+    video = _project_video(project_id)
+    path = projects.artifact_paths(video)["highlights"]
+    if not path.is_file():
+        raise HTTPException(404, "no highlights yet")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    items = data.get("highlights", [])
+    if not 1 <= index <= len(items):
+        raise HTTPException(404, f"highlight {index} does not exist")
+
+    highlight = items[index - 1]
+    end = float(req.end_sec)
+    ceiling = projects.video_duration(video)
+    if ceiling is not None:
+        end = min(end, ceiling)
+    end = max(end, highlight["start_sec"] + MIN_HIGHLIGHT_SEC)
+    highlight["end_sec"] = round(end, 3)
+    highlight["end"] = format_timestamp(end)
+    highlight["duration_sec"] = round(end - highlight["start_sec"], 1)
+
+    # the excerpt is the transcript of the range, so it has to follow the edit
+    segments_file = projects.artifact_paths(video)["segments"]
+    if segments_file.is_file():
+        segments = json.loads(segments_file.read_text(encoding="utf-8"))["segments"]
+        highlight["excerpt"] = " ".join(
+            s["text"] for s in segments
+            if s["start"] >= highlight["start_sec"] - 0.5 and s["end"] <= end + 0.5
+        )
+
+    write_highlights(
+        items,
+        data.get("video", video.name),
+        video.stem,
+        video.resolve().parent,
+        data.get("gemini_model", ""),
+    )
+    # attached after the write — a derived field, not part of the file
+    out = vertical_clip_path(video, index)
+    return {**highlight, "vertical": {"index": index, "path": str(out), "exists": out.is_file()}}
+
+
 @router.post("/projects/{project_id}/export")
 def export_resolve_xml(project_id: str) -> dict:
     from ..export import export_timeline
@@ -311,7 +369,7 @@ def _build_job(req: JobRequest) -> tuple[list[str], Path, dict | None, list[Path
             "highlights", "--segments", str(segments),
             "--count", str(p.get("count", 8)),
             "--min-duration", str(p.get("min_duration", 20)),
-            "--max-duration", str(p.get("max_duration", 110)),
+            "--max-duration", str(p.get("max_duration", 100)),
             "--gemini-model", p.get("gemini_model", "gemini-flash-latest"),
         )
         return argv, repo_cwd, None, []

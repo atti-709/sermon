@@ -202,7 +202,7 @@ def main() -> None:
     p.add_argument("--segments", required=True)
     p.add_argument("--count", type=int, default=8)
     p.add_argument("--min-duration", type=int, default=20)
-    p.add_argument("--max-duration", type=int, default=110)
+    p.add_argument("--max-duration", type=int, default=100)
     p.add_argument("--gemini-model", default="gemini-flash-latest")
     p.set_defaults(func=run_highlights)
 
