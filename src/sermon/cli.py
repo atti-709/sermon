@@ -246,7 +246,9 @@ def _cmd_captions(args: argparse.Namespace) -> None:
     paths = write_captions(captions, video, copy_to_app=not args.no_copy)
     print(f"  captions: {paths['captions']}")
 
-    if not args.no_track:
+    if not args.no_track and _is_vertical(video):
+        print("Clip is already vertical (≤ 9:16) — skipping speaker tracking.")
+    elif not args.no_track:
         from .track import track_video
 
         print("Tracking the speaker for the 9:16 crop (Apple Vision)…")
@@ -270,6 +272,17 @@ def _cmd_web(args: argparse.Namespace) -> None:
     except ImportError as exc:
         sys.exit(f"error: web dependencies missing ({exc}) — run `uv sync`")
     run_server(port=args.port, open_browser=not args.no_browser)
+
+
+def _is_vertical(video: Path) -> bool:
+    """True when the clip needs no 9:16 reframe (vertical-first exports)."""
+    from .export import probe_video
+
+    try:
+        meta = probe_video(video)
+        return meta["width"] / meta["height"] <= 9 / 16 * 1.02
+    except Exception:
+        return False
 
 
 def _cmd_track(args: argparse.Namespace) -> None:

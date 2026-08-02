@@ -62,6 +62,8 @@ export type Highlight = {
   scores: { hook: number; flow: number; value: number; reach: number };
   score_reason: string;
   excerpt: string;
+  /** server-augmented: the vertical tracked export for this highlight */
+  vertical?: { index: number; path: string; exists: boolean };
 };
 export type HighlightsFile = { video: string; gemini_model: string; highlights: Highlight[] };
 
@@ -91,7 +93,7 @@ export type JobDone = {
   result: Record<string, unknown> | null;
   error: string | null;
 };
-export type JobKind = "transcribe" | "highlights" | "captions" | "track" | "render";
+export type JobKind = "transcribe" | "highlights" | "export_vertical" | "captions" | "track" | "render";
 
 export type Correction = { index: number; before: string; after: string; reason: string };
 export type CorrectionsFile = { gemini_model: string; corrections: Correction[] };

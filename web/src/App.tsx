@@ -17,7 +17,7 @@ export const STEPS: { key: StepKey; title: string }[] = [
   { key: "transcribe", title: "Transcribe" },
   { key: "highlights", title: "Highlights" },
   { key: "export", title: "Edit in Resolve" },
-  { key: "captions", title: "Captions & Tracking" },
+  { key: "captions", title: "Captions" },
   { key: "preview", title: "Preview & Edit" },
   { key: "render", title: "Render" },
 ];

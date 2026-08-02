@@ -142,13 +142,21 @@ def get_transcript(project_id: str) -> dict:
     return json.loads(segments.read_text(encoding="utf-8"))
 
 
+def vertical_clip_path(video: Path, index: int) -> Path:
+    return video.resolve().parent / f"{video.stem}.h{index}.vertical.mov"
+
+
 @router.get("/projects/{project_id}/highlights")
 def get_highlights(project_id: str) -> dict:
     video = _project_video(project_id)
     highlights = projects.artifact_paths(video)["highlights"]
     if not highlights.is_file():
         raise HTTPException(404, "no highlights yet")
-    return json.loads(highlights.read_text(encoding="utf-8"))
+    data = json.loads(highlights.read_text(encoding="utf-8"))
+    for i, h in enumerate(data.get("highlights", []), 1):
+        out = vertical_clip_path(video, i)
+        h["vertical"] = {"index": i, "path": str(out), "exists": out.is_file()}
+    return data
 
 
 @router.post("/projects/{project_id}/export")
@@ -281,6 +289,19 @@ def _build_job(req: JobRequest) -> tuple[list[str], Path, dict | None, list[Path
             "--gemini-model", p.get("gemini_model", "gemini-flash-latest"),
         )
         return argv, repo_cwd, None, []
+
+    if req.kind == "export_vertical":
+        video = _project_video(req.project_id)
+        try:
+            start, end, index = float(p["start_sec"]), float(p["end_sec"]), int(p["index"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(422, "export_vertical needs start_sec, end_sec and index") from exc
+        out = vertical_clip_path(video, index)
+        argv = worker_argv(
+            "export-vertical", "--video", str(video),
+            "--start", str(start), "--end", str(end), "--out", str(out),
+        )
+        return argv, repo_cwd, {"paths": {"vertical": str(out)}}, []
 
     if req.kind in ("captions", "track"):
         clip = _project_clip(req.project_id, req.clip_id)

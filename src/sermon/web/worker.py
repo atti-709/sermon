@@ -151,6 +151,26 @@ def run_captions(args: argparse.Namespace) -> None:
     os._exit(0)
 
 
+def run_export_vertical(args: argparse.Namespace) -> None:
+    from ..vertical import export_vertical_clip
+
+    video = Path(args.video)
+    out = Path(args.out)
+    emit({"event": "progress", "percent": None, "stage": "tracking",
+          "detail": f"tracking the speaker in {args.start:.0f}s–{args.end:.0f}s (Apple Vision)…"})
+    last = {"pct": -5.0}
+
+    def on_progress(pct: float) -> None:
+        if pct - last["pct"] >= 1:  # don't flood the stream at ffmpeg speed
+            last["pct"] = pct
+            emit({"event": "progress", "percent": round(pct, 1), "stage": "encoding",
+                  "detail": f"rendering vertical ProRes… {pct:.0f}%"})
+
+    with contextlib.redirect_stdout(_LineWriter(lambda line: emit({"event": "log", "line": line}))):
+        export_vertical_clip(video, args.start, args.end, out, on_progress=on_progress)
+    emit({"event": "result", "paths": {"vertical": str(out)}})
+
+
 def run_track(args: argparse.Namespace) -> None:
     from ..track import track_video
 
@@ -195,6 +215,13 @@ def main() -> None:
     p = sub.add_parser("track")
     p.add_argument("--clip", required=True)
     p.set_defaults(func=run_track)
+
+    p = sub.add_parser("export-vertical")
+    p.add_argument("--video", required=True)
+    p.add_argument("--start", type=float, required=True)
+    p.add_argument("--end", type=float, required=True)
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=run_export_vertical)
 
     args = parser.parse_args()
     try:

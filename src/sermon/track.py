@@ -76,10 +76,22 @@ def probe_video(video: Path) -> dict:
 # Detection
 
 
-def _scene_cut_candidates(video: Path) -> list[float]:
-    """Timestamps whose frame differs strongly from the previous one (possible hard cuts)."""
+def _seek_args(start: float | None) -> list[str]:
+    return ["-ss", f"{start:.3f}"] if start else []
+
+
+def _dur_args(duration: float | None) -> list[str]:
+    return ["-t", f"{duration:.3f}"] if duration else []
+
+
+def _scene_cut_candidates(video: Path, start: float | None = None,
+                          duration: float | None = None) -> list[float]:
+    """Timestamps whose frame differs strongly from the previous one (possible hard cuts).
+
+    With `start`/`duration` only that window is analyzed; timestamps come back
+    relative to `start` (ffmpeg resets pts when -ss precedes -i)."""
     proc = subprocess.run(
-        ["ffmpeg", "-v", "error", "-i", str(video),
+        ["ffmpeg", "-v", "error", *_seek_args(start), "-i", str(video), *_dur_args(duration),
          "-vf", f"scale=320:-2,select='gt(scene,{SCENE_THRESHOLD})',metadata=print:file=-",
          "-f", "null", "-"],
         check=True, capture_output=True, text=True,
@@ -91,7 +103,8 @@ def _scene_cut_candidates(video: Path) -> list[float]:
     return cuts
 
 
-def _detect_samples(video: Path, meta: dict, sample_hz: float) -> list[Sample]:
+def _detect_samples(video: Path, meta: dict, sample_hz: float, start: float | None = None,
+                    duration: float | None = None) -> list[Sample]:
     """Decode frames at `sample_hz` and find the main subject with the Vision framework."""
     import Quartz
     import Vision
@@ -102,7 +115,7 @@ def _detect_samples(video: Path, meta: dict, sample_hz: float) -> list[Sample]:
     frame_bytes = w * h * 3
 
     proc = subprocess.Popen(
-        ["ffmpeg", "-v", "error", "-i", str(video),
+        ["ffmpeg", "-v", "error", *_seek_args(start), "-i", str(video), *_dur_args(duration),
          "-vf", f"fps={sample_hz},scale={w}:{h}",
          "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
         stdout=subprocess.PIPE,
@@ -363,18 +376,21 @@ def framing_file_for(video: Path) -> Path:
     return video.resolve().parent / f"{video.stem}.framing.json"
 
 
-def track_video(video: Path, sample_hz: float = SAMPLE_HZ, copy_to_app: bool = True,
-                debug: bool = False) -> dict[str, Path]:
-    meta = probe_video(video)
-    duration = meta["duration"]
+def compute_camera_path(video: Path, meta: dict, sample_hz: float = SAMPLE_HZ,
+                        start: float | None = None, duration: float | None = None,
+                        ) -> tuple[np.ndarray, np.ndarray, list[float], float, list[Sample]]:
+    """Detect the subject and solve the virtual camera for the whole video or a
+    time window. Returns (t_grid, camera, cuts, crop_width_fraction, samples);
+    times are relative to `start`."""
+    span = duration if duration is not None else meta["duration"]
 
-    cut_candidates = _scene_cut_candidates(video)
-    samples = _detect_samples(video, meta, sample_hz)
+    cut_candidates = _scene_cut_candidates(video, start, duration)
+    samples = _detect_samples(video, meta, sample_hz, start, duration)
     detected = sum(1 for s in samples if s.kind != "none")
     faces = sum(1 for s in samples if s.kind == "face")
     print(f"  detections: {detected}/{len(samples)} samples ({faces} face, {detected - faces} body)")
 
-    t_grid, subject = _clean_track(samples, duration)
+    t_grid, subject = _clean_track(samples, span)
     cuts = _confirm_cuts(cut_candidates, t_grid, subject)
     if cut_candidates:
         detail = ", ".join(f"{c:.2f}s{'✓' if c in cuts else '✗'}" for c in cut_candidates)
@@ -383,12 +399,22 @@ def track_video(video: Path, sample_hz: float = SAMPLE_HZ, copy_to_app: bool = T
     # crop width as a fraction of source width (e.g. 0.316 for 16:9 -> 9:16)
     crop_w = OUT_ASPECT * meta["height"] / meta["width"]
     camera = _solve_camera(t_grid, subject, cuts, crop_half=crop_w / 2)
-    keyframes = _thin_keyframes(t_grid, camera, cuts)
 
     vel = np.abs(np.diff(camera)) * SOLVE_HZ
     moving = float(np.mean(vel > 0.002))
-    print(f"  camera: still {100 * (1 - moving):.0f}% of the time, "
-          f"{len(keyframes)} keyframes, peak speed {vel.max():.3f} width/s")
+    print(f"  camera: still {100 * (1 - moving):.0f}% of the time, peak speed {vel.max():.3f} width/s")
+
+    return t_grid, camera, cuts, crop_w, samples
+
+
+def track_video(video: Path, sample_hz: float = SAMPLE_HZ, copy_to_app: bool = True,
+                debug: bool = False) -> dict[str, Path]:
+    meta = probe_video(video)
+    duration = meta["duration"]
+
+    t_grid, camera, cuts, crop_w, samples = compute_camera_path(video, meta, sample_hz)
+    keyframes = _thin_keyframes(t_grid, camera, cuts)
+    print(f"  emitted {len(keyframes)} keyframes")
 
     framing = {
         "version": 1,

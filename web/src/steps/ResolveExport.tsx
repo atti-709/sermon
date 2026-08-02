@@ -52,35 +52,37 @@ export const ResolveExport: React.FC<{
     <>
       <h2>Edit in DaVinci Resolve</h2>
       <p className="hint">
-        The highlights become an XML timeline referencing the original video — one hook clip + full clip
-        per highlight, back-to-back, nothing re-encoded.
+        Bring the <strong>vertical tracked clips</strong> you exported on the Highlights step into a
+        1080×1920 timeline — B-roll and titles land directly in the final vertical frame.
       </p>
-      <div className="row" style={{ margin: "14px 0" }}>
-        <button className="primary" onClick={doExport}>
-          {xmlPath ? "Re-export timeline XML" : "Export timeline XML"}
-        </button>
-        {xmlPath && <button onClick={() => api.reveal(xmlPath)}>Reveal in Finder</button>}
-      </div>
-      {xmlPath && <p className="hint mono">{xmlPath}</p>}
-      {error && <p className="error">{error}</p>}
-
       <div className="card">
         <ol className="instructions" style={{ margin: 0, paddingLeft: 20 }}>
+          <li>Create a 1080×1920 timeline and drop in the exported <code>.vertical.mov</code> clips.</li>
           <li>
-            In Resolve: <strong>File → Import Timeline → Import AAF, EDL, XML…</strong> and pick the
-            exported file.
-          </li>
-          <li>
-            Each highlight is two clips: the <em>hook</em> (the clip's opener) and the full passage. Roll
-            the edges to fine-tune cut points — the full source is linked.
+            Open with the hook: duplicate the hook moment to the front, then the full passage. Roll and
+            trim freely — the export covers the whole highlight range.
           </li>
           <li>Add B-roll, trims, whatever the clip needs. Aim for ~1:30, cap 1:50.</li>
-          <li>
-            Render each finished clip (16:9 is fine — the vertical crop and captions come next), then
-            register it below.
-          </li>
+          <li>Render each finished clip vertical (1080×1920 — captions come next), then register it below.</li>
         </ol>
       </div>
+
+      <details style={{ margin: "14px 0" }}>
+        <summary className="hint" style={{ cursor: "pointer" }}>
+          backup: horizontal XML timeline of the original video
+        </summary>
+        <div className="row" style={{ margin: "10px 0" }}>
+          <button onClick={doExport}>{xmlPath ? "Re-export timeline XML" : "Export timeline XML"}</button>
+          {xmlPath && <button onClick={() => api.reveal(xmlPath)}>Reveal in Finder</button>}
+        </div>
+        {xmlPath && <p className="hint mono">{xmlPath}</p>}
+        <p className="hint">
+          Imports via <strong>File → Import Timeline → Import AAF, EDL, XML…</strong> — one hook clip +
+          full clip per highlight, referencing the original horizontal video (the old workflow: crop
+          and tracking happen after the edit instead of before).
+        </p>
+      </details>
+      {error && <p className="error">{error}</p>}
 
       <h3>Rendered clips</h3>
       {project.clips.map((clip) => (

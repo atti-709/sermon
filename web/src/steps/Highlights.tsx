@@ -1,67 +1,27 @@
-import { useEffect, useRef, useState } from "react";
-import { api, fmtTime } from "../api";
+import { useEffect, useState } from "react";
+import { api } from "../api";
 import type { Highlight, ProjectState } from "../types";
 import { JobRunner } from "../components/JobRunner";
+import { SegmentPlayer } from "../components/SegmentPlayer";
 
-/** Seekable preview of one highlight range inside the full sermon video.
- *  The media route supports HTTP Range, so the browser only fetches what it
- *  shows; #t=start,end frames the initial poster at the clip's first frame. */
-const HighlightPreview: React.FC<{ videoUrl: string; highlight: Highlight }> = ({
-  videoUrl,
-  highlight: h,
-}) => {
-  const ref = useRef<HTMLVideoElement>(null);
-  const stopAt = useRef<number | null>(null);
-
-  const playRange = (from: number, to: number) => {
-    const video = ref.current;
-    if (!video) return;
-    stopAt.current = to;
-    video.currentTime = from;
-    void video.play();
-  };
-
-  return (
-    <div className="hl-preview">
-      <video
-        ref={ref}
-        src={`${videoUrl}#t=${h.start_sec},${h.end_sec}`}
-        preload="metadata"
-        controls
-        onTimeUpdate={(e) => {
-          const video = e.currentTarget;
-          if (stopAt.current != null && video.currentTime >= stopAt.current) {
-            video.pause();
-            stopAt.current = null;
-          }
-        }}
-        onPlay={(e) => {
-          // native play control: respect the clip's end unless a button set its own stop
-          if (stopAt.current == null && e.currentTarget.currentTime < h.end_sec) {
-            stopAt.current = h.end_sec;
-          }
-        }}
-      />
-      <div className="row" style={{ gap: 6, marginTop: 6 }}>
-        <button onClick={() => playRange(h.hook_start_sec, h.hook_end_sec)}>
-          ▶ hook · {Math.round(h.hook_duration_sec)}s
-        </button>
-        <button onClick={() => playRange(h.start_sec, h.end_sec)}>
-          ▶ full · {fmtTime(h.duration_sec)}
-        </button>
-      </div>
-    </div>
-  );
-};
-
-const HighlightCard: React.FC<{ highlight: Highlight; rank: number; videoUrl: string | null }> = ({
-  highlight: h,
-  rank,
-  videoUrl,
-}) => (
+const HighlightCard: React.FC<{
+  highlight: Highlight;
+  rank: number;
+  videoUrl: string | null;
+  projectId: string;
+  onExported: () => void;
+}> = ({ highlight: h, rank, videoUrl, projectId, onExported }) => (
   <div className="card hl-card">
     <div className="row" style={{ alignItems: "flex-start", gap: 16 }}>
-      {videoUrl && <HighlightPreview videoUrl={videoUrl} highlight={h} />}
+      {videoUrl && (
+        <SegmentPlayer
+          videoUrl={videoUrl}
+          startSec={h.start_sec}
+          endSec={h.end_sec}
+          hookStartSec={h.hook_start_sec}
+          hookEndSec={h.hook_end_sec}
+        />
+      )}
       <div style={{ flex: 1, minWidth: 260 }}>
         <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
           <div>
@@ -89,6 +49,28 @@ const HighlightCard: React.FC<{ highlight: Highlight; rank: number; videoUrl: st
           <p>{h.excerpt}</p>
           <p className="hint">{h.score_reason}</p>
         </details>
+        <div style={{ marginTop: 12 }}>
+          <JobRunner
+            kind="export_vertical"
+            projectId={projectId}
+            params={{
+              start_sec: Math.min(h.start_sec, h.hook_start_sec ?? h.start_sec),
+              end_sec: Math.max(h.end_sec, h.hook_end_sec ?? h.end_sec),
+              index: rank,
+            }}
+            label={h.vertical?.exists ? "Re-export vertical" : "Export vertical for DaVinci"}
+            onDone={(done) => {
+              if (done.state === "succeeded") onExported();
+            }}
+          />
+          {h.vertical?.exists && (
+            <div className="row" style={{ marginTop: 6, gap: 8 }}>
+              <span className="chip on">vertical · tracked · 1080×1920</span>
+              <span className="hint mono" style={{ wordBreak: "break-all" }}>{h.vertical.path}</span>
+              <button onClick={() => api.reveal(h.vertical!.path)}>Reveal in Finder</button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   </div>
@@ -128,8 +110,9 @@ export const Highlights: React.FC<{
       <h2>Highlights</h2>
       <p className="hint">
         The timestamped transcript (text only — no audio or video) goes to Gemini, which suggests clip
-        candidates with a hook moment and a virality score. Shorter is better: aim for ~1:30. Re-running
-        is cheap — tweak and retry freely.
+        candidates with a hook moment and a virality score. Preview a candidate, then{" "}
+        <strong>Export vertical</strong>: the speaker gets tracked and the clip comes out as a
+        1080×1920 ProRes ready for your DaVinci edit — B-roll lands in the final vertical frame.
       </p>
       {!keyPresent && (
         <p className="error">
@@ -194,7 +177,14 @@ export const Highlights: React.FC<{
             </button>
           </div>
           {highlights.map((h, i) => (
-            <HighlightCard key={`${h.start_sec}-${i}`} highlight={h} rank={i + 1} videoUrl={videoUrl} />
+            <HighlightCard
+              key={`${h.start_sec}-${i}`}
+              highlight={h}
+              rank={i + 1}
+              videoUrl={videoUrl}
+              projectId={project.id}
+              onExported={() => void loadHighlights()}
+            />
           ))}
         </>
       )}

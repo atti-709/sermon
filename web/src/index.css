@@ -275,14 +275,7 @@ label.field {
 /* --- highlights --- */
 .hl-preview {
   flex-shrink: 0;
-  width: 300px;
-}
-.hl-preview video {
-  width: 300px;
-  aspect-ratio: 16 / 9;
-  border-radius: 8px;
-  background: black;
-  display: block;
+  width: 340px;
 }
 .hl-preview button {
   font-size: 12px;
