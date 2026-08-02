@@ -10,6 +10,10 @@ Transcribe Slovak sermon videos locally and pick social-media highlight moments 
   **virality score** (1–100, a hook-weighted composite of hook/flow/value/reach sub-scores,
   OpusClip-style) for fast triage. Shorter is better: the prompt targets 30–90 s and
   hard-caps at 110 s. You fine-tune the exact cut points yourself.
+- **Vertical export** cuts each highlight *before* the edit: the speaker is tracked with the
+  Apple Vision framework and the 9:16 crop follows them, so DaVinci receives a 1080×1920
+  ProRes and your B-roll, titles and trims land in the final vertical frame. This lives on
+  the Highlights step of the web UI; the CLI still offers the older horizontal route.
 
 ## Setup
 
@@ -53,8 +57,8 @@ Run everything from the checkout with `uv run sermon …`. A global `uv tool ins
 ## Web UI (the easy way)
 
 A local web app guides you through the whole pipeline — pick video → transcribe →
-highlights → Resolve hand-off → captions & tracking → preview with click-to-edit
-words → final render:
+highlights, each exportable as a tracked vertical clip → Resolve hand-off → captions →
+preview with click-to-edit words → final render:
 
 ```sh
 uv run sermon web   # opens http://127.0.0.1:8756
@@ -101,6 +105,10 @@ The timeline references the original video (nothing is re-encoded), each clip is
 after its highlight, and since the full source is linked you can roll each clip's
 edges to fine-tune the cut points.
 
+This is the horizontal route: you edit in 16:9 and the 9:16 crop happens afterwards, at the
+captions step. The web UI's vertical export inverts that — you edit clips that are already
+cropped and tracked — and is the better default. It has no CLI equivalent yet.
+
 `sermon run` skips transcription when a `.segments.json` already exists (`--force` to redo),
 so re-running highlights with different settings is cheap.
 
@@ -130,7 +138,8 @@ captions and burn them in with the Remotion app in `captions/`:
 uv run sermon captions rendered_clip.mp4   # WhisperX word-level timestamps (CPU, ~1 min/clip)
 #   + automatic Gemini proofread: fixes Czech spillover, diacritics, mishearings —
 #     never paraphrases (word-for-word repairs only; --no-grammar-check to skip)
-#   + automatic speaker tracking for the 9:16 crop (see below; --no-track to skip)
+#   + speaker tracking for the 9:16 crop (see below; --no-track to skip) — skipped
+#     automatically when the clip is already vertical, i.e. came from a vertical export
 # fix any remaining typos in Studio (click a word) or in rendered_clip.captions.json
 cd captions && npm run studio              # preview; renders via the Studio render button, or:
 npx remotion render CaptionedClip --props='{"src":"rendered_clip.mp4","captions":null}' out/final.mp4
@@ -146,20 +155,29 @@ only in which of two adjacent source frames a 50 → 30 fps output frame samples
 
 `sermon captions` writes `<clip>.captions.json` (one entry per word) next to the clip and
 copies both into `captions/public/`. The caption style is hard-coded in
-`captions/src/CaptionedClip.tsx`: 9:16 vertical, karaoke pages of ~3-5 words where words
-appear progressively as spoken (the full page stays visible once complete). Drop your brand
-font at `captions/public/fonts/brand.otf`; a fallback stack is used until then.
+`captions/src/CaptionedClipCore.tsx`: 9:16 vertical, karaoke pages of ~3-5 words where words
+appear progressively as spoken (the full page stays visible once complete). Captions are set
+in Aspekta 600 by Ivo Dolenc, bundled at `captions/public/fonts/Aspekta-600.ttf` under the
+SIL Open Font License 1.1 (`OFL.txt` sits beside it). To rebrand, drop your own file in that
+folder and update both references to it — `FONT_FILE` in `captions/src/CaptionedClip.tsx`
+(Studio and renders) and the `fontUrl` in `web/src/steps/Preview.tsx` (the web preview);
+a system stack takes over whenever the file is missing.
 
 ## Speaker tracking (the 9:16 crop follows the preacher)
 
-The Remotion app crops the 16:9 clip to 9:16; by default that crop is centered. `sermon track`
-(run automatically by `sermon captions`) finds the speaker and writes `<clip>.framing.json`
-with smoothed X offsets for the crop window, which the app applies per frame:
+One solver, two places to apply it. The **vertical export** (web UI, before the edit) runs it
+over the highlight's time window and bakes the moving crop into the exported clip — a single
+ffmpeg pass where the camera path drives a dynamic crop via `sendcmd`, scaled to 1080×1920 and
+encoded as hardware ProRes HQ. The **horizontal route** (after the edit) instead keeps the clip
+in 16:9 and writes `<clip>.framing.json`, smoothed X offsets that the Remotion app applies per
+frame, so the crop moves at render time:
 
 ```sh
-uv run sermon track rendered_clip.mp4      # ~10 s per clip
+uv run sermon track rendered_clip.mp4      # ~10 s per clip; runs automatically in `sermon captions`
 uv run sermon track rendered_clip.mp4 --debug   # + preview video with the crop window drawn in
 ```
+
+Either way the camera behaves the same:
 
 - Face detection runs on the **Apple Neural Engine** (Vision framework, ~7 ms/frame,
   10 samples/s), with a human-body fallback when the face is turned away.
