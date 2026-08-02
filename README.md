@@ -13,14 +13,42 @@ Transcribe Slovak sermon videos locally and pick social-media highlight moments 
 
 ## Setup
 
-Requires macOS on Apple Silicon, [uv](https://docs.astral.sh/uv/), and ffmpeg (`brew install ffmpeg`).
+Requires **macOS on Apple Silicon**: transcription uses the Metal GPU, speaker tracking the
+Neural Engine, rendering the VideoToolbox encoder. You also need [Homebrew](https://brew.sh)
+and git — plus DaVinci Resolve (the free edition is enough) for the editing step.
 
 ```sh
-uv sync
-export GEMINI_API_KEY=...   # https://aistudio.google.com/apikey — only needed for highlights
+git clone https://github.com/atti-709/sermon.git
+cd sermon
+./scripts/setup.sh
 ```
 
-Optionally install it as a global command: `uv tool install .`
+The script installs ffmpeg, node and [uv](https://docs.astral.sh/uv/) via Homebrew if they're
+missing, then the Python dependencies, the Remotion renderer in `captions/`, and the web UI in
+`web/` (which it also builds — without that build, `sermon web` serves the API only).
+
+Then put a Gemini API key in the `.env` the script created at the repo root:
+
+```sh
+GEMINI_API_KEY=...   # free key: https://aistudio.google.com/apikey
+```
+
+It's needed for highlight selection and the caption proofread; everything else runs offline.
+Keys are free and per-person, so get your own rather than sharing one.
+
+**Updating** — `./scripts/update.sh` pulls the latest commit and re-runs the setup, which is
+idempotent and takes seconds when the dependencies haven't moved. The Python code runs
+straight from the checkout, so most updates need nothing beyond the pull.
+
+Budget ~2 GB of disk for the dependencies (`uv sync` pulls torch for WhisperX) and another
+~2 GB for models, which download on demand the first time you use each step: whisper
+`large-v3-turbo` and a WhisperX alignment model for word timings (both cached in
+`~/.cache/huggingface`), plus a headless Chrome the first time Remotion renders. After that
+only the Gemini calls touch the network.
+
+Run everything from the checkout with `uv run sermon …`. A global `uv tool install .` covers
+`transcribe`/`highlights`/`export` only — the captions, tracking and web steps resolve
+`captions/` and `web/dist` relative to the repo.
 
 ## Web UI (the easy way)
 
@@ -29,8 +57,7 @@ highlights → Resolve hand-off → captions & tracking → preview with click-t
 words → final render:
 
 ```sh
-cd web && npm install && npm run build && cd ..   # once
-uv run sermon web                                  # opens http://127.0.0.1:8756
+uv run sermon web   # opens http://127.0.0.1:8756
 ```
 
 The server runs on your Mac, so everything Apple-native still applies: transcription
