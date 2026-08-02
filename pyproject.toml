@@ -8,6 +8,10 @@ dependencies = [
     "google-genai>=1.0",
     "pydantic>=2",
     "whisperx>=3.8.6",
+    "pyobjc-framework-vision>=12.2.1",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "starlette>=0.47",
 ]
 
 [project.scripts]

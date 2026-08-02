@@ -60,6 +60,18 @@ def main(argv: list[str] | None = None) -> None:
         default=DEFAULT_GEMINI_MODEL,
         help=f"Gemini model for the proofread (default: {DEFAULT_GEMINI_MODEL})",
     )
+    p_captions.add_argument("--no-track", action="store_true", help="skip subject tracking for the 9:16 crop")
+
+    p_track = sub.add_parser(
+        "track", help="track the speaker (Apple Vision) and write X offsets for the 9:16 crop"
+    )
+    p_track.add_argument("video", type=Path, help="rendered clip from DaVinci")
+    p_track.add_argument("--no-copy", action="store_true", help="don't copy the framing JSON into captions/public/")
+    p_track.add_argument("--debug", action="store_true", help="also render a preview with the crop window burned in")
+
+    p_web = sub.add_parser("web", help="start the local web UI (guided pipeline in the browser)")
+    p_web.add_argument("--port", type=int, default=8756, help="port to listen on (default: 8756)")
+    p_web.add_argument("--no-browser", action="store_true", help="don't open the browser automatically")
 
     p_run = sub.add_parser("run", help="transcribe + highlights in one go")
     _add_transcribe_args(p_run)
@@ -76,6 +88,10 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_export(args)
     elif args.command == "captions":
         _cmd_captions(args)
+    elif args.command == "track":
+        _cmd_track(args)
+    elif args.command == "web":
+        _cmd_web(args)
     else:
         _cmd_run(args)
 
@@ -229,12 +245,46 @@ def _cmd_captions(args: argparse.Namespace) -> None:
 
     paths = write_captions(captions, video, copy_to_app=not args.no_copy)
     print(f"  captions: {paths['captions']}")
+
+    if not args.no_track:
+        from .track import track_video
+
+        print("Tracking the speaker for the 9:16 crop (Apple Vision)…")
+        try:
+            track_paths = track_video(video, copy_to_app=not args.no_copy)
+            print(f"  framing: {track_paths['framing']}")
+        except Exception as exc:
+            print(f"  tracking failed ({exc}) — the crop stays centered")
+
     if "app" in paths:
         print(f"  copied into captions app: {paths['app'].parent}")
         print(f"  → fix any typos in {paths['captions'].name}, then: cd captions && npm run studio")
     # whisperx leaves non-daemon threads behind that block a normal exit
     sys.stdout.flush()
     os._exit(0)
+
+
+def _cmd_web(args: argparse.Namespace) -> None:
+    try:
+        from .web.app import run_server
+    except ImportError as exc:
+        sys.exit(f"error: web dependencies missing ({exc}) — run `uv sync`")
+    run_server(port=args.port, open_browser=not args.no_browser)
+
+
+def _cmd_track(args: argparse.Namespace) -> None:
+    from .track import track_video
+
+    video: Path = args.video
+    if not video.exists():
+        sys.exit(f"error: {video} does not exist")
+
+    print(f"Tracking the speaker in {video.name} (Apple Vision)…")
+    started = time.monotonic()
+    paths = track_video(video, copy_to_app=not args.no_copy, debug=args.debug)
+    print(f"Done in {time.monotonic() - started:.0f} s.")
+    for name, path in paths.items():
+        print(f"  {name}: {path}")
 
 
 def _resolve_segments_path(input_path: Path) -> Path:

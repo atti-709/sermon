@@ -2,5 +2,7 @@
 __pycache__/
 *.egg-info/
 dist/
+node_modules/
 .env
 .DS_Store
+*.tsbuildinfo

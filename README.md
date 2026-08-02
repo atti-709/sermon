@@ -22,7 +22,31 @@ export GEMINI_API_KEY=...   # https://aistudio.google.com/apikey — only needed
 
 Optionally install it as a global command: `uv tool install .`
 
-## Usage
+## Web UI (the easy way)
+
+A local web app guides you through the whole pipeline — pick video → transcribe →
+highlights → Resolve hand-off → captions & tracking → preview with click-to-edit
+words → final render:
+
+```sh
+cd web && npm install && npm run build && cd ..   # once
+uv run sermon web                                  # opens http://127.0.0.1:8756
+```
+
+The server runs on your Mac, so everything Apple-native still applies: transcription
+on the Metal GPU, face tracking on the Neural Engine, "Reveal in Finder" buttons.
+Long steps run as subprocesses with live logs and progress streamed to the browser;
+project state is derived from the `<stem>.*` files next to your video, so you can
+quit and resume anytime (recent projects are remembered in `~/.sermon/recents.json`).
+
+The preview step embeds the exact Remotion composition the final render uses
+(`captions/src/CaptionedClipCore.tsx`, shared with Remotion Studio) — click a caption
+word to fix a typo; edits land in the same `.captions.json` Studio and the render read.
+
+For frontend development: `uv run sermon web --no-browser` in one terminal,
+`npm run dev` in `web/` in another (Vite proxies `/api` and `/media`).
+
+## Usage (CLI)
 
 ```sh
 # everything in one go: transcript + highlights + Resolve timeline
@@ -79,13 +103,42 @@ captions and burn them in with the Remotion app in `captions/`:
 uv run sermon captions rendered_clip.mp4   # WhisperX word-level timestamps (CPU, ~1 min/clip)
 #   + automatic Gemini proofread: fixes Czech spillover, diacritics, mishearings —
 #     never paraphrases (word-for-word repairs only; --no-grammar-check to skip)
+#   + automatic speaker tracking for the 9:16 crop (see below; --no-track to skip)
 # fix any remaining typos in Studio (click a word) or in rendered_clip.captions.json
 cd captions && npm run studio              # preview; renders via the Studio render button, or:
 npx remotion render CaptionedClip --props='{"src":"rendered_clip.mp4","captions":null}' out/final.mp4
 ```
+
+Renders use VideoToolbox hardware encoding (`remotion.config.ts`), so a 90-second clip encodes
+on the GPU at ~8 Mbps instead of x264 crf 18 — same file size, about 15% less wall clock and
+half the CPU time. The rest of the render is Chromium rasterizing the captions, which no
+encoder flag speeds up.
 
 `sermon captions` writes `<clip>.captions.json` (one entry per word) next to the clip and
 copies both into `captions/public/`. The caption style is hard-coded in
 `captions/src/CaptionedClip.tsx`: 9:16 vertical, karaoke pages of ~3-5 words where words
 appear progressively as spoken (the full page stays visible once complete). Drop your brand
 font at `captions/public/fonts/brand.otf`; a fallback stack is used until then.
+
+## Speaker tracking (the 9:16 crop follows the preacher)
+
+The Remotion app crops the 16:9 clip to 9:16; by default that crop is centered. `sermon track`
+(run automatically by `sermon captions`) finds the speaker and writes `<clip>.framing.json`
+with smoothed X offsets for the crop window, which the app applies per frame:
+
+```sh
+uv run sermon track rendered_clip.mp4      # ~10 s per clip
+uv run sermon track rendered_clip.mp4 --debug   # + preview video with the crop window drawn in
+```
+
+- Face detection runs on the **Apple Neural Engine** (Vision framework, ~7 ms/frame,
+  10 samples/s), with a human-body fallback when the face is turned away.
+- The virtual camera behaves like a calm operator, not like OpusClip's jitter: it **holds
+  still** (~80 % of the time) while the speaker stays inside a dead zone, ignores brief
+  excursions that return within a few seconds, and otherwise **pans once, smoothly**
+  (minimum-jerk, ≈1-3 s) to where the speaker is about to settle — it never whips back
+  mid-pan, and it uses lookahead, so pans lead the subject instead of trailing it.
+- Hard cuts (e.g. the hook) are detected via ffmpeg scene scores but only honored when the
+  subject position actually jumps across them — the camera then snaps exactly at the cut
+  instead of gliding. LED-wall slide changes behind the speaker are ignored.
+- No faces at all → the crop stays centered, same as before tracking existed.
