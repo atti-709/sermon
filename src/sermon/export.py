@@ -71,6 +71,13 @@ def write_resolve_xml(highlights: list[dict], video: Path, out_path: Path) -> Pa
         ET.SubElement(file, "pathurl").text = "file://localhost" + quote(str(video.resolve()))
         rate_el(file)
         ET.SubElement(file, "duration").text = str(frames(meta["duration"]))
+        # Resolve's importer silently rejects the whole XML when audio clipitems
+        # reference a <file> that has no <timecode> block (found empirically —
+        # video-only timelines import fine without it)
+        tc = ET.SubElement(file, "timecode")
+        ET.SubElement(tc, "string").text = "00:00:00:00"
+        ET.SubElement(tc, "displayformat").text = "DF" if ntsc == "TRUE" else "NDF"
+        rate_el(tc)
         media = ET.SubElement(file, "media")
         v = ET.SubElement(media, "video")
         sc = ET.SubElement(v, "samplecharacteristics")
