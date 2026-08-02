@@ -4,3 +4,4 @@ public/*.mp4
 public/*.mov
 public/*.captions.json
 public/*.framing.json
+public/*.style.json
