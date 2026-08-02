@@ -1,6 +1,7 @@
 """Word-level caption generation for rendered clips via WhisperX (transcribe + forced alignment)."""
 
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -8,6 +9,19 @@ from pydantic import BaseModel, Field
 
 # Remotion captions app inside this repo; `sermon captions` copies the video + JSON here
 APP_PUBLIC_DIR = Path(__file__).resolve().parents[2] / "captions" / "public"
+
+
+# Hesitation sounds never belong in captions (clean-read style). Matched on the word
+# with punctuation stripped and lowercased; a shape regex catches spelling variants
+# (ééé, ehmmm). Deliberately conservative: at least 2 letters, and real Slovak words
+# that double as fillers ("no", "tak", "aha", single-letter prepositions) never match.
+FILLER_WORDS = frozenset({"ehm", "hm", "mhm", "uhm", "um", "uh", "eh"})
+_HESITATION_RE = re.compile(r"^(?:[eé]{1,4}h?m{0,3}|h{1,2}m{1,3}|m{2,4}h?m{0,2}|u{1,3}h?m{0,2}|[aá]{2,4}h?)$")
+
+
+def is_filler(word: str) -> bool:
+    bare = word.strip().strip(".,!?…;:\"'").lower()
+    return len(bare) >= 2 and (bare in FILLER_WORDS or bool(_HESITATION_RE.match(bare)))
 
 
 def generate_captions(video: Path, model: str = "large-v3-turbo", language: str = "sk") -> list[dict]:
@@ -23,12 +37,26 @@ def generate_captions(video: Path, model: str = "large-v3-turbo", language: str 
     align_model, metadata = whisperx.load_align_model(language_code=language, device=device)
     aligned = whisperx.align(result["segments"], align_model, metadata, audio, device)
 
+    def _bare(text: str) -> str:
+        return text.strip().strip(".,!?…;:\"'").lower()
+
     captions = []
     for segment in aligned["segments"]:
         for word in segment["words"]:
+            if is_filler(word["word"]):
+                continue
             if "start" not in word:  # words the aligner could not place (numbers, etc.)
                 if captions:
                     captions[-1]["text"] += " " + word["word"].strip()
+                continue
+            # stutter repeats render once ("že že" → "že"); rhetorical repetition
+            # is protected by its punctuation ("Svätý, svätý" keeps both)
+            if (
+                captions
+                and _bare(word["word"]) == _bare(captions[-1]["text"])
+                and not captions[-1]["text"].rstrip().endswith((",", ".", "!", "?", "…", ";", ":"))
+            ):
+                captions[-1]["endMs"] = round(word["end"] * 1000)
                 continue
             start_ms = round(word["start"] * 1000)
             captions.append(
@@ -45,8 +73,11 @@ def generate_captions(video: Path, model: str = "large-v3-turbo", language: str 
 
 class WordCorrection(BaseModel):
     index: int = Field(description="Index of the word in the numbered list")
-    corrected: str = Field(description="The corrected single word, keeping any attached punctuation")
-    reason: str = Field(description="Very short tag: 'czech form', 'diacritics', 'mishearing', 'casing', …")
+    corrected: str = Field(
+        description="The corrected single word, keeping any attached punctuation. "
+        "An empty string means: delete this word (hesitation fillers only)."
+    )
+    reason: str = Field(description="Very short tag: 'czech form', 'diacritics', 'mishearing', 'casing', 'filler', 'brand', …")
 
 
 class CorrectionList(BaseModel):
@@ -62,6 +93,9 @@ instead of "ktorí"; the letters ě, ř, ů do not exist in Slovak at all)
 - it mishears a consonant or syllable, producing a non-word or a similar-sounding wrong word \
 ("hdovec" instead of "vdovec")
 - it occasionally miscapitalizes proper nouns and sentence starts ("boh" → "Boh", "ježiš" → "Ježiš")
+- it spells brand names and foreign proper nouns phonetically ("rejbeny" instead of "Ray-Bany",
+  "fejsbuk" instead of "Facebook", "ajfon" instead of "iPhone")
+- it sometimes transcribes hesitation sounds as words ("ehm", "hmm", "uhm")
 
 Your job is ONLY to repair such transcription errors — you are restoring what the speaker
 actually said, not editing their language.
@@ -70,10 +104,17 @@ STRICT RULES:
 1. Never paraphrase, reorder, translate, or stylistically improve anything. The speaker's
    informal or colloquial phrasing stays exactly as spoken.
 2. A correction must sound nearly identical to the original when read aloud — you are fixing
-   the spelling of the SAME spoken word, never choosing a better word.
+   the spelling of the SAME spoken word, never choosing a better word. For brand names and
+   foreign proper nouns, use the official spelling while keeping the spoken Slovak
+   inflection ending ("rejbenov" → "Ray-Banov").
 3. Each correction replaces exactly one word with exactly one word. Never merge or split words.
-4. Keep punctuation attached to the word unless the word itself is wrong.
-5. Grammatical errors made by the SPEAKER (spoken wrong endings, fillers, slang) must be kept.
+   Exception: a hesitation filler (ehm, hm, uhm and similar non-words) is corrected to an
+   EMPTY string, which removes it from the captions. Only pure hesitation sounds may be
+   removed — real words ("no", "tak", "vlastne") always stay, even when used as fillers.
+4. Keep punctuation attached to the word unless the word itself is wrong. When removing a
+   filler that carried sentence punctuation ("Ehm,"), just remove it — do not move the
+   punctuation elsewhere.
+5. Grammatical errors made by the SPEAKER (spoken wrong endings, slang) must be kept.
 6. If you are not confident the speaker actually said your corrected form, leave the word
    unchanged. Few safe corrections beat many risky ones.
 
@@ -112,16 +153,26 @@ def proofread_captions(captions: list[dict], gemini_model: str) -> list[tuple[in
         raise RuntimeError(f"unparseable Gemini response: {response.text[:200]}")
 
     applied = []
+    deletions = []
     for corr in parsed.corrections:
         if not 0 <= corr.index < len(captions):
             continue
         before = captions[corr.index]["text"]
         after = corr.corrected.strip()
+        if not after:
+            # empty correction = delete (hesitation fillers only — be safe about it)
+            if is_filler(before):
+                deletions.append(corr.index)
+                applied.append((corr.index, before.strip(), "", corr.reason))
+            continue
         # one word must stay one word, or the per-word timings break
-        if not after or " " in after or after == before.strip():
+        if " " in after or after == before.strip():
             continue
         captions[corr.index]["text"] = (" " if before.startswith(" ") else "") + after
         applied.append((corr.index, before.strip(), after, corr.reason))
+    # delete back-to-front so earlier indices stay valid
+    for index in sorted(set(deletions), reverse=True):
+        del captions[index]
     return applied
 
 
