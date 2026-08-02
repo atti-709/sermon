@@ -24,6 +24,7 @@ Both pieces are tracked separately and joined inside one filtergraph, so there
 is still a single encode and the seam carries continuous timestamps.
 """
 
+import json
 import subprocess
 from pathlib import Path
 from typing import Callable
@@ -186,4 +187,23 @@ def export_vertical_clip(
     script_file.unlink(missing_ok=True)
     if proc.returncode != 0:
         raise RuntimeError(f"ffmpeg failed: {proc.stderr.read() if proc.stderr else ''}".strip())
+    write_cut_sidecar(out_path, [d for _, d in cuts])
     return out_path
+
+
+def cuts_file_for(clip: Path) -> Path:
+    return clip.resolve().parent / f"{clip.stem}.cuts.json"
+
+
+def write_cut_sidecar(out_path: Path, durations: list[float]) -> None:
+    """Record where the exported clip is spliced, in its own timeline.
+
+    Captioning has to know: WhisperX hears the splice as one continuous
+    utterance and drags words across it, so it transcribes each piece on its
+    own. A single-piece export clears any sidecar from an earlier run."""
+    path = cuts_file_for(out_path)
+    seams = [round(sum(durations[: i + 1]), 3) for i in range(len(durations) - 1)]
+    if not seams:
+        path.unlink(missing_ok=True)
+        return
+    path.write_text(json.dumps({"cuts": seams}, indent=2) + "\n", encoding="utf-8")

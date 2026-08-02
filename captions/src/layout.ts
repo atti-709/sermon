@@ -150,13 +150,8 @@ const paginateSentence = (tokens: PageToken[]): PageToken[][][] => {
   return pages;
 };
 
-export const buildPages = (captions: Caption[]): Page[] => {
-  const tokens: PageToken[] = captions.map((c) => ({
-    text: c.text.trim(),
-    fromMs: c.startMs,
-    toMs: c.endMs,
-  }));
-
+/** Pages for one uninterrupted run of speech (see buildPages for `breaksMs`). */
+const paginateRun = (tokens: PageToken[]): Page[] => {
   // sentences never share a line: a sentence always begins at a line start
   const sentences: PageToken[][] = [];
   let sentence: PageToken[] = [];
@@ -209,6 +204,46 @@ export const buildPages = (captions: Caption[]): Page[] => {
       lines: pageLines,
     });
   }
+  return pages;
+};
+
+/** Build the pages of a clip.
+ *
+ *  `breaksMs` are splice points in the clip (a hook-first export cuts the hook
+ *  in front of the passage). A page may not span one: the shot changes there,
+ *  so text from before the cut still standing after it reads as a stuck
+ *  caption — and the two sides are different moments, not one sentence. */
+export const buildPages = (captions: Caption[], breaksMs: number[] = []): Page[] => {
+  const tokens: PageToken[] = captions.map((c) => ({
+    text: c.text.trim(),
+    fromMs: c.startMs,
+    toMs: c.endMs,
+  }));
+  const breaks = [...breaksMs].sort((a, b) => a - b);
+
+  // one run per piece of the clip; pages, and the sentences behind them, never
+  // straddle a splice
+  const pages: Page[] = [];
+  let run: PageToken[] = [];
+  let cursor = 0;
+  for (const token of tokens) {
+    while (cursor < breaks.length && token.fromMs >= breaks[cursor]) {
+      pages.push(...paginateRun(run));
+      run = [];
+      cursor++;
+    }
+    run.push(token);
+  }
+  pages.push(...paginateRun(run));
+
+  // every page stays inside its own piece of the clip: the reveal lead-in never
+  // reaches back across the cut the page follows, and the hold never runs past
+  // the cut it precedes
+  const spokenAt = (page: Page) => page.lines[0][0].fromMs;
+  for (const page of pages) {
+    const previousCut = breaks.filter((b) => b <= spokenAt(page)).pop();
+    if (previousCut !== undefined) page.startMs = Math.max(page.startMs, previousCut);
+  }
 
   // timing polish: no sub-second flashes, no flicker between nearby pages
   for (let i = 0; i < pages.length; i++) {
@@ -219,6 +254,8 @@ export const buildPages = (captions: Caption[]): Page[] => {
       const gap = next.startMs - pages[i].endMs;
       if (gap > 0 && gap < MAX_BRIDGE_MS) pages[i].endMs = next.startMs;
     }
+    const nextCut = breaks.find((b) => b > spokenAt(pages[i]));
+    if (nextCut !== undefined) pages[i].endMs = Math.min(pages[i].endMs, nextCut);
   }
   return pages;
 };

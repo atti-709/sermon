@@ -194,11 +194,12 @@ export const Preview: React.FC<{
       captions,
       framing,
       yOffset,
+      cuts: clip.cuts ?? null,
       fontUrls: FONT_URLS,
       editable: true,
       onSaveCorrections: save,
     }),
-    [clip.urls.video, captions, framing, yOffset, save],
+    [clip.urls.video, captions, framing, yOffset, clip.cuts, save],
   );
 
   if (error)

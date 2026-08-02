@@ -90,6 +90,8 @@ export const CaptionedClipCore: React.FC<{
   /** px to lift the caption block above its default height (negative = lower);
    *  set per clip by the web app's caption-position slider */
   yOffset?: number | null;
+  /** splice points in seconds (a hook-first export) — no caption page spans one */
+  cuts?: number[] | null;
   /** full URL of each brand-font weight the style uses (600 for the current
    *  line, 400 for spoken ones); falls back to a system stack when missing */
   fontUrls?: { weight: number; url: string }[] | null;
@@ -105,6 +107,7 @@ export const CaptionedClipCore: React.FC<{
   captions: captionsFromProps,
   framing,
   yOffset,
+  cuts,
   fontUrls,
   editable = false,
   captureClicksForStudio = false,
@@ -142,7 +145,10 @@ export const CaptionedClipCore: React.FC<{
     ).finally(() => continueRender(fontHandle));
   }, [fontHandle, fontKey]);
 
-  const pages = useMemo(() => (captions ? buildPages(captions) : []), [captions]);
+  const pages = useMemo(
+    () => (captions ? buildPages(captions, (cuts ?? []).map((sec) => sec * 1000)) : []),
+    [captions, cuts],
+  );
 
   // word currently being edited, identified by its start timestamp
   const [editing, setEditing] = useState<{ fromMs: number; text: string } | null>(null);

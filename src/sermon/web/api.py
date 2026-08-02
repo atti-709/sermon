@@ -416,6 +416,7 @@ def _build_job(req: JobRequest) -> tuple[list[str], Path, dict | None, list[Path
             "captions": None,
             "framing": None,
             "yOffset": projects.load_style(clip)["yOffset"],
+            "cuts": projects.load_cuts(clip) or None,
         }
         props_file.write_text(json.dumps(props), encoding="utf-8")
         out_path = projects.RENDER_OUT_DIR / f"{clip.stem}.captioned.mp4"

@@ -16,6 +16,8 @@ export const captionsFileFor = (src: string) => src.replace(/\.[^.]+$/, "") + ".
 export const framingFileFor = (src: string) => src.replace(/\.[^.]+$/, "") + ".framing.json";
 /** per-clip caption style written by the web app: { "yOffset": <px> } */
 export const styleFileFor = (src: string) => src.replace(/\.[^.]+$/, "") + ".style.json";
+/** splice points written by the vertical export: { "cuts": [<sec>, …] } */
+export const cutsFileFor = (src: string) => src.replace(/\.[^.]+$/, "") + ".cuts.json";
 
 export type { Framing };
 
@@ -24,7 +26,8 @@ export const CaptionedClip: React.FC<{
   captions: Caption[] | null;
   framing?: Framing | null;
   yOffset?: number | null;
-}> = ({ src, captions, framing, yOffset }) => {
+  cuts?: number[] | null;
+}> = ({ src, captions, framing, yOffset, cuts }) => {
   const { isStudio, isRendering } = getRemotionEnvironment();
   const editable = isStudio && !isRendering;
 
@@ -34,6 +37,7 @@ export const CaptionedClip: React.FC<{
       captions={captions}
       framing={framing}
       yOffset={yOffset}
+      cuts={cuts}
       fontUrls={FONT_FILES.map(({ weight, file }) => ({ weight, url: staticFile(file) }))}
       editable={editable}
       captureClicksForStudio={editable}

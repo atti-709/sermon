@@ -11,7 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from ..captions import APP_PUBLIC_DIR
+from ..captions import APP_PUBLIC_DIR, load_cuts
 
 RECENTS_FILE = Path.home() / ".sermon" / "recents.json"
 RENDER_OUT_DIR = APP_PUBLIC_DIR.parent / "out"
@@ -137,9 +137,11 @@ def clip_state(project_id: str, clip: Path, probe: bool = True) -> dict:
     # propagate to the render step instead of silently showing an old file
     rendered_mtime = rendered.stat().st_mtime if rendered.is_file() else None
     sources = [clip, public_video, captions_json, framing_json, style_path(clip),
+               clip.parent / f"{clip.stem}.cuts.json",
                APP_PUBLIC_DIR / f"{clip.stem}.captions.json",
                APP_PUBLIC_DIR / f"{clip.stem}.framing.json",
-               APP_PUBLIC_DIR / f"{clip.stem}.style.json"]
+               APP_PUBLIC_DIR / f"{clip.stem}.style.json",
+               APP_PUBLIC_DIR / f"{clip.stem}.cuts.json"]
     source_mtime = max((p.stat().st_mtime for p in sources if p.is_file()), default=None)
     stale = bool(rendered_mtime and source_mtime and source_mtime > rendered_mtime + 1)
 
@@ -153,6 +155,7 @@ def clip_state(project_id: str, clip: Path, probe: bool = True) -> dict:
         "has_corrections": (clip.parent / f"{clip.stem}.corrections.json").is_file(),
         "in_public": in_public,
         "style": load_style(clip),
+        "cuts": load_cuts(clip),
         "rendered": {
             "path": str(rendered),
             "exists": rendered.is_file(),

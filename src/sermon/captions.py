@@ -24,23 +24,31 @@ def is_filler(word: str) -> bool:
     return len(bare) >= 2 and (bare in FILLER_WORDS or bool(_HESITATION_RE.match(bare)))
 
 
-def generate_captions(video: Path, model: str = "large-v3-turbo", language: str = "sk") -> list[dict]:
-    """Run WhisperX and return Remotion `Caption[]`: one entry per word."""
-    import whisperx
+SAMPLE_RATE = 16000  # whisperx.load_audio always resamples to this
 
-    device = "cpu"  # no CUDA on macOS; clips are short so CPU is fine
-    audio = whisperx.load_audio(str(video))
 
-    asr = whisperx.load_model(model, device, compute_type="int8", language=language)
-    result = asr.transcribe(audio, language=language)
+def load_cuts(video: Path) -> list[float]:
+    """Splice points inside a clip, in seconds (written by the vertical export)."""
+    path = video.resolve().parent / f"{video.stem}.cuts.json"
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    return sorted(float(c) for c in data.get("cuts", []) if float(c) > 0)
 
-    align_model, metadata = whisperx.load_align_model(language_code=language, device=device)
-    aligned = whisperx.align(result["segments"], align_model, metadata, audio, device)
 
-    def _bare(text: str) -> str:
-        return text.strip().strip(".,!?…;:\"'").lower()
+def _bare(text: str) -> str:
+    return text.strip().strip(".,!?…;:\"'").lower()
 
-    captions = []
+
+def _append_words(captions: list[dict], aligned: dict, offset: float, first: int) -> None:
+    """Append one window's aligned words, shifted onto the clip's timeline.
+
+    `first` is the index this window's words start at, so the stutter check never
+    looks back across a splice — a hook-first clip deliberately repeats the words
+    on either side of the cut."""
     for segment in aligned["segments"]:
         for word in segment["words"]:
             if is_filler(word["word"]):
@@ -52,22 +60,52 @@ def generate_captions(video: Path, model: str = "large-v3-turbo", language: str 
             # stutter repeats render once ("že že" → "že"); rhetorical repetition
             # is protected by its punctuation ("Svätý, svätý" keeps both)
             if (
-                captions
+                len(captions) > first
                 and _bare(word["word"]) == _bare(captions[-1]["text"])
                 and not captions[-1]["text"].rstrip().endswith((",", ".", "!", "?", "…", ";", ":"))
             ):
-                captions[-1]["endMs"] = round(word["end"] * 1000)
+                captions[-1]["endMs"] = round((word["end"] + offset) * 1000)
                 continue
-            start_ms = round(word["start"] * 1000)
+            start_ms = round((word["start"] + offset) * 1000)
             captions.append(
                 {
                     "text": (" " if captions else "") + word["word"].strip(),
                     "startMs": start_ms,
-                    "endMs": round(word["end"] * 1000),
+                    "endMs": round((word["end"] + offset) * 1000),
                     "timestampMs": start_ms,
                     "confidence": word.get("score"),
                 }
             )
+
+
+def generate_captions(video: Path, model: str = "large-v3-turbo", language: str = "sk") -> list[dict]:
+    """Run WhisperX and return Remotion `Caption[]`: one entry per word.
+
+    A spliced clip (hook-first export) is transcribed piece by piece. Run whole,
+    Whisper hears one continuous utterance across the cut and forced alignment
+    then squeezes the words that belong after it into the tail before it — a
+    burst of 20-150 ms words at zero confidence, with one word straddling the
+    splice. Per-piece runs keep every word inside the shot it was spoken in."""
+    import whisperx
+
+    device = "cpu"  # no CUDA on macOS; clips are short so CPU is fine
+    audio = whisperx.load_audio(str(video))
+    total = len(audio) / SAMPLE_RATE
+
+    bounds = [0.0, *(c for c in load_cuts(video) if c < total), total]
+    windows = [(a, b) for a, b in zip(bounds, bounds[1:]) if b - a > 0.2]
+
+    asr = whisperx.load_model(model, device, compute_type="int8", language=language)
+    align_model, metadata = whisperx.load_align_model(language_code=language, device=device)
+
+    captions: list[dict] = []
+    for i, (start, end) in enumerate(windows, 1):
+        if len(windows) > 1:
+            print(f"  transcribing piece {i}/{len(windows)}: {start:.1f}s–{end:.1f}s")
+        chunk = audio[int(start * SAMPLE_RATE) : int(end * SAMPLE_RATE)]
+        result = asr.transcribe(chunk, language=language)
+        aligned = whisperx.align(result["segments"], align_model, metadata, chunk, device)
+        _append_words(captions, aligned, offset=start, first=len(captions))
     return captions
 
 
@@ -224,5 +262,9 @@ def write_captions(captions: list[dict], video: Path, copy_to_app: bool = True) 
         style_json = json_path.parent / f"{video.stem}.style.json"
         if style_json.is_file():
             shutil.copy2(style_json, APP_PUBLIC_DIR / style_json.name)
+        # splice points, so the composition keeps caption pages off the cut
+        cuts_json = json_path.parent / f"{video.stem}.cuts.json"
+        if cuts_json.is_file():
+            shutil.copy2(cuts_json, APP_PUBLIC_DIR / cuts_json.name)
         paths["app"] = APP_PUBLIC_DIR / video.name
     return paths

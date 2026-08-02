@@ -13,6 +13,8 @@ export type ClipState = {
   has_corrections: boolean;
   in_public: boolean;
   style?: CaptionStyle; // absent when an older server is still running
+  /** splice points (sec) of a hook-first export — no caption page spans one */
+  cuts?: number[];
   rendered: { path: string; exists: boolean; mtime: number | null; stale: boolean };
   urls: { video: string | null; rendered: string | null };
   duration_sec: number | null;
