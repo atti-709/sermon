@@ -86,6 +86,26 @@ def _artifact(path: Path) -> dict:
     }
 
 
+def style_path(clip: Path) -> Path:
+    """Per-clip caption style sidecar. Keys are camelCase because the Remotion
+    composition reads this same file straight from captions/public/."""
+    return clip.resolve().parent / f"{clip.stem}.style.json"
+
+
+DEFAULT_CAPTION_STYLE = {"yOffset": 0}
+
+
+def load_style(clip: Path) -> dict:
+    for candidate in (style_path(clip), APP_PUBLIC_DIR / f"{clip.stem}.style.json"):
+        if candidate.is_file():
+            try:
+                data = json.loads(candidate.read_text(encoding="utf-8"))
+                return {"yOffset": int(data.get("yOffset", 0))}
+            except (json.JSONDecodeError, TypeError, ValueError):
+                break  # unreadable sidecar — fall back to the default position
+    return dict(DEFAULT_CAPTION_STYLE)
+
+
 def artifact_paths(video: Path) -> dict[str, Path]:
     video = video.resolve()
     stem = video.stem
@@ -108,13 +128,14 @@ def clip_state(project_id: str, clip: Path, probe: bool = True) -> dict:
     rendered = RENDER_OUT_DIR / f"{clip.stem}.captioned.mp4"
     in_public = public_video.is_file()
 
-    # a render goes stale when any of its inputs (clip, captions, framing —
-    # either copy) changed after it was produced; caption edits must visibly
+    # a render goes stale when any of its inputs (clip, captions, framing, caption
+    # style — either copy) changed after it was produced; caption edits must visibly
     # propagate to the render step instead of silently showing an old file
     rendered_mtime = rendered.stat().st_mtime if rendered.is_file() else None
-    sources = [clip, public_video, captions_json, framing_json,
+    sources = [clip, public_video, captions_json, framing_json, style_path(clip),
                APP_PUBLIC_DIR / f"{clip.stem}.captions.json",
-               APP_PUBLIC_DIR / f"{clip.stem}.framing.json"]
+               APP_PUBLIC_DIR / f"{clip.stem}.framing.json",
+               APP_PUBLIC_DIR / f"{clip.stem}.style.json"]
     source_mtime = max((p.stat().st_mtime for p in sources if p.is_file()), default=None)
     stale = bool(rendered_mtime and source_mtime and source_mtime > rendered_mtime + 1)
 
@@ -127,6 +148,7 @@ def clip_state(project_id: str, clip: Path, probe: bool = True) -> dict:
         "has_framing": framing_json.is_file() or (APP_PUBLIC_DIR / f"{clip.stem}.framing.json").is_file(),
         "has_corrections": (clip.parent / f"{clip.stem}.corrections.json").is_file(),
         "in_public": in_public,
+        "style": load_style(clip),
         "rendered": {
             "path": str(rendered),
             "exists": rendered.is_file(),

@@ -238,6 +238,32 @@ def get_corrections(project_id: str, clip_id: str) -> dict:
     return json.loads(corr_path.read_text(encoding="utf-8"))
 
 
+class CaptionStyleRequest(BaseModel):
+    # camelCase mirrors the Remotion prop — the composition reads this file itself
+    yOffset: int = Field(0, ge=-400, le=1000)
+
+
+@router.get("/projects/{project_id}/clips/{clip_id}/style")
+def get_style(project_id: str, clip_id: str) -> dict:
+    """Caption style for this clip — defaults when no sidecar was written yet."""
+    return projects.load_style(_project_clip(project_id, clip_id))
+
+
+@router.put("/projects/{project_id}/clips/{clip_id}/style")
+def put_style(project_id: str, clip_id: str, style: CaptionStyleRequest) -> dict:
+    clip = _project_clip(project_id, clip_id)
+    saved = {"yOffset": style.yOffset}
+    contents = json.dumps(saved, indent=2) + "\n"
+    # both copies stay identical, as for captions — Studio, Player and render
+    # must never disagree about where the captions sit
+    written = []
+    for target in (projects.style_path(clip), APP_PUBLIC_DIR / f"{clip.stem}.style.json"):
+        if target.parent.is_dir():
+            target.write_text(contents, encoding="utf-8")
+            written.append(str(target))
+    return {"ok": True, "style": saved, "written": written}
+
+
 @router.get("/projects/{project_id}/clips/{clip_id}/framing")
 def get_framing(project_id: str, clip_id: str) -> dict:
     clip = _project_clip(project_id, clip_id)
@@ -322,7 +348,13 @@ def _build_job(req: JobRequest) -> tuple[list[str], Path, dict | None, list[Path
             raise HTTPException(422, "clip is not in captions/public yet — run the captions step first")
         projects.RENDER_OUT_DIR.mkdir(parents=True, exist_ok=True)
         props_file = projects.RENDER_OUT_DIR / f".props-{uuid.uuid4().hex[:8]}.json"
-        props_file.write_text(json.dumps({"src": clip.name, "captions": None, "framing": None}), encoding="utf-8")
+        props = {
+            "src": clip.name,
+            "captions": None,
+            "framing": None,
+            "yOffset": projects.load_style(clip)["yOffset"],
+        }
+        props_file.write_text(json.dumps(props), encoding="utf-8")
         out_path = projects.RENDER_OUT_DIR / f"{clip.stem}.captioned.mp4"
         argv = ["npx", "remotion", "render", "CaptionedClip", f"--props={props_file}", str(out_path)]
         return argv, APP_PUBLIC_DIR.parent, {"paths": {"output": str(out_path)}}, [props_file]

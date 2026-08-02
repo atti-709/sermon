@@ -11,6 +11,8 @@ const FONT_FILE = "fonts/Aspekta-600.ttf";
 
 export const captionsFileFor = (src: string) => src.replace(/\.[^.]+$/, "") + ".captions.json";
 export const framingFileFor = (src: string) => src.replace(/\.[^.]+$/, "") + ".framing.json";
+/** per-clip caption style written by the web app: { "yOffset": <px> } */
+export const styleFileFor = (src: string) => src.replace(/\.[^.]+$/, "") + ".style.json";
 
 export type { Framing };
 
@@ -18,7 +20,8 @@ export const CaptionedClip: React.FC<{
   src: string;
   captions: Caption[] | null;
   framing?: Framing | null;
-}> = ({ src, captions, framing }) => {
+  yOffset?: number | null;
+}> = ({ src, captions, framing, yOffset }) => {
   const { isStudio, isRendering } = getRemotionEnvironment();
   const editable = isStudio && !isRendering;
 
@@ -27,6 +30,7 @@ export const CaptionedClip: React.FC<{
       videoSrc={staticFile(src)}
       captions={captions}
       framing={framing}
+      yOffset={yOffset}
       fontUrl={staticFile(FONT_FILE)}
       editable={editable}
       captureClicksForStudio={editable}

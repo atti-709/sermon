@@ -120,7 +120,12 @@ export const App: React.FC = () => {
           />
         )}
         {step === "preview" && project && clip && (
-          <Preview project={project} clip={clip} onNext={() => setStep("render")} />
+          <Preview
+            project={project}
+            clip={clip}
+            onRefresh={refresh}
+            onNext={() => setStep("render")}
+          />
         )}
         {step === "render" && project && clip && <Render project={project} clip={clip} onRefresh={refresh} />}
       </main>

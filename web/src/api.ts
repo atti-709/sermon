@@ -1,5 +1,6 @@
 import type {
   Caption,
+  CaptionStyle,
   ClipState,
   CorrectionsFile,
   Framing,
@@ -55,6 +56,14 @@ export const api = {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(captions),
+    }),
+  getStyle: (id: string, clipId: string) =>
+    request<CaptionStyle>(`/api/projects/${id}/clips/${clipId}/style`),
+  putStyle: (id: string, clipId: string, style: CaptionStyle) =>
+    request<{ ok: boolean; style: CaptionStyle }>(`/api/projects/${id}/clips/${clipId}/style`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(style),
     }),
   getFraming: (id: string, clipId: string) =>
     request<Framing>(`/api/projects/${id}/clips/${clipId}/framing`),

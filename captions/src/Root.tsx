@@ -2,16 +2,18 @@ import { Caption } from "@remotion/captions";
 import { getVideoMetadata } from "@remotion/media-utils";
 import { CalculateMetadataFunction, Composition, staticFile } from "remotion";
 import { z } from "zod";
-import { CaptionedClip, captionsFileFor, framingFileFor, type Framing } from "./CaptionedClip";
+import { CaptionedClip, captionsFileFor, framingFileFor, styleFileFor, type Framing } from "./CaptionedClip";
 
 const FPS = 30;
 
 export const schema = z.object({
   // filename of a clip inside public/ — its captions are expected at <name>.captions.json,
-  // its (optional) subject-tracking crop path at <name>.framing.json
+  // its (optional) subject-tracking crop path at <name>.framing.json and its (optional)
+  // caption-position offset at <name>.style.json
   src: z.string(),
   captions: z.array(z.any()).nullable(),
   framing: z.any().nullable(),
+  yOffset: z.number().nullable(),
 });
 
 type Props = z.infer<typeof schema>;
@@ -35,12 +37,24 @@ const calculateMetadata: CalculateMetadataFunction<Props> = async ({ props }) =>
     framing = null;
   }
 
+  // caption position: an explicit prop (the render job passes one) wins over the
+  // sidecar the web app's slider writes; without either the default height applies
+  let yOffset = props.yOffset;
+  if (yOffset == null) {
+    try {
+      const styleRes = await fetch(staticFile(styleFileFor(props.src)));
+      if (styleRes.ok) yOffset = ((await styleRes.json()) as { yOffset?: number }).yOffset ?? null;
+    } catch {
+      yOffset = null;
+    }
+  }
+
   return {
     durationInFrames: Math.ceil(meta.durationInSeconds * FPS),
     fps: FPS,
     width: 1080,
     height: 1920,
-    props: { ...props, captions, framing },
+    props: { ...props, captions, framing, yOffset },
   };
 };
 
@@ -50,7 +64,7 @@ export const Root: React.FC = () => {
       id="CaptionedClip"
       component={CaptionedClip}
       schema={schema}
-      defaultProps={{"src":"clip.mov","captions":null,"framing":null}}
+      defaultProps={{"src":"clip.mov","captions":null,"framing":null,"yOffset":null}}
       durationInFrames={30 * 10}
       fps={FPS}
       width={1080}

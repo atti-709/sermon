@@ -69,6 +69,14 @@ select:focus {
   outline: none;
   border-color: var(--accent);
 }
+input[type="range"] {
+  background: none;
+  border: none;
+  padding: 0;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 
 /* --- step rail --- */
 .rail {

@@ -84,11 +84,16 @@ const CaptionEditor = memo(function CaptionEditor({
   );
 });
 
+/** slider bounds around the composition's default caption height, in composition px */
+const Y_OFFSET_MIN = -200;
+const Y_OFFSET_MAX = 400;
+
 export const Preview: React.FC<{
   project: ProjectState;
   clip: ClipState;
+  onRefresh: () => Promise<void>;
   onNext: () => void;
-}> = ({ project, clip, onNext }) => {
+}> = ({ project, clip, onRefresh, onNext }) => {
   const [captions, setCaptions] = useState<Caption[] | null>(null);
   const [framing, setFraming] = useState<Framing | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -96,6 +101,12 @@ export const Preview: React.FC<{
   const [activeIndex, setActiveIndex] = useState(-1);
   const playerRef = useRef<PlayerRef>(null);
   const saveTimer = useRef<number | null>(null);
+  const styleTimer = useRef<number | null>(null);
+
+  // the slider's live value; tagged with its clip so switching clips falls back
+  // to that clip's saved offset without an extra effect
+  const [dragged, setDragged] = useState<{ clipId: string; yOffset: number } | null>(null);
+  const yOffset = dragged?.clipId === clip.id ? dragged.yOffset : (clip.style?.yOffset ?? 0);
 
   useEffect(() => {
     setCaptions(null);
@@ -122,24 +133,46 @@ export const Preview: React.FC<{
     return () => player.removeEventListener("frameupdate", onFrame);
   }, [captions]);
 
+  const flagSaved = useCallback(() => {
+    setSaveState("saved");
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => setSaveState("idle"), 2000);
+  }, []);
+
   const save = useCallback(
     (updated: Caption[]) => {
       setCaptions(updated);
       setSaveState("saving");
       api
         .putCaptions(project.id, clip.id, updated)
-        .then(() => {
-          setSaveState("saved");
-          if (saveTimer.current) window.clearTimeout(saveTimer.current);
-          saveTimer.current = window.setTimeout(() => setSaveState("idle"), 2000);
-        })
+        .then(flagSaved)
         .catch((exc) => {
           setSaveState("error");
           setError(exc.message);
         });
     },
-    [project.id, clip.id],
+    [project.id, clip.id, flagSaved],
   );
+
+  // the slider moves the captions in the player immediately; the sidecar the
+  // render and Studio read is written once the drag settles
+  const changeYOffset = (value: number) => {
+    setDragged({ clipId: clip.id, yOffset: value });
+    setSaveState("saving");
+    if (styleTimer.current) window.clearTimeout(styleTimer.current);
+    styleTimer.current = window.setTimeout(() => {
+      api
+        .putStyle(project.id, clip.id, { yOffset: value })
+        .then(() => {
+          flagSaved();
+          void onRefresh(); // a moved caption makes an existing render stale
+        })
+        .catch((exc) => {
+          setSaveState("error");
+          setError(exc.message);
+        });
+    }, 350);
+  };
 
   const seekToMs = useCallback(
     (ms: number) => playerRef.current?.seekTo(Math.round((ms / 1000) * FPS)),
@@ -153,11 +186,12 @@ export const Preview: React.FC<{
       videoSrc: clip.urls.video ?? "",
       captions,
       framing,
+      yOffset,
       fontUrl: "/media/app/fonts/Aspekta-600.ttf",
       editable: true,
       onSaveCorrections: save,
     }),
-    [clip.urls.video, captions, framing, save],
+    [clip.urls.video, captions, framing, yOffset, save],
   );
 
   if (error)
@@ -184,17 +218,37 @@ export const Preview: React.FC<{
         the video itself are clickable too.
       </p>
       <div className="row" style={{ alignItems: "flex-start", marginTop: 14, gap: 20 }}>
-        <Player
-          ref={playerRef}
-          component={CaptionedClipCore}
-          durationInFrames={Math.max(1, Math.ceil(clip.duration_sec * FPS))}
-          fps={FPS}
-          compositionWidth={1080}
-          compositionHeight={1920}
-          inputProps={inputProps}
-          controls
-          style={{ width: 330, borderRadius: 12, overflow: "hidden", flexShrink: 0 }}
-        />
+        <div style={{ width: 330, flexShrink: 0 }}>
+          <Player
+            ref={playerRef}
+            component={CaptionedClipCore}
+            durationInFrames={Math.max(1, Math.ceil(clip.duration_sec * FPS))}
+            fps={FPS}
+            compositionWidth={1080}
+            compositionHeight={1920}
+            inputProps={inputProps}
+            controls
+            style={{ width: 330, borderRadius: 12, overflow: "hidden" }}
+          />
+          <label className="field" style={{ marginTop: 14 }}>
+            <span style={{ display: "flex", justifyContent: "space-between" }}>
+              <span>caption height</span>
+              <span className="mono">{yOffset > 0 ? `+${yOffset}` : yOffset} px</span>
+            </span>
+            <input
+              type="range"
+              min={Y_OFFSET_MIN}
+              max={Y_OFFSET_MAX}
+              step={10}
+              value={yOffset}
+              onChange={(e) => changeYOffset(Number(e.target.value))}
+            />
+          </label>
+          <p className="hint" style={{ marginTop: 6 }}>
+            Right lifts the captions, left drops them. Saved per clip — Studio and the render use
+            the same position.
+          </p>
+        </div>
         <div style={{ flex: 1, minWidth: 280 }}>
           <p className="hint" style={{ marginTop: 0 }}>
             {captions.length} words ·{" "}

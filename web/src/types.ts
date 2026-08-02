@@ -1,5 +1,8 @@
 export type Artifact = { path: string; exists: boolean; mtime: number | null };
 
+/** per-clip caption style; `yOffset` lifts the caption block (px, negative = lower) */
+export type CaptionStyle = { yOffset: number };
+
 export type ClipState = {
   id: string;
   path: string;
@@ -9,6 +12,7 @@ export type ClipState = {
   has_framing: boolean;
   has_corrections: boolean;
   in_public: boolean;
+  style?: CaptionStyle; // absent when an older server is still running
   rendered: { path: string; exists: boolean; mtime: number | null; stale: boolean };
   urls: { video: string | null; rendered: string | null };
   duration_sec: number | null;

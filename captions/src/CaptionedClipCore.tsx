@@ -28,8 +28,11 @@ const FONT_WEIGHT = 600;
 const FONT_SIZE = 64;
 const TEXT_TRANSFORM: React.CSSProperties["textTransform"] = "none";
 const TEXT_COLOR = "white";
-const STROKE = "12px black";
-const BOTTOM_OFFSET = 560; // px from the bottom of the 1920px frame — keeps captions
+// No outline: a hard stroke reads as a sticker pasted over the speaker. Legibility
+// comes from a soft drop shadow instead — a tight one for contrast against light
+// clothing, a wide diffuse one that darkens the background behind the whole word.
+const TEXT_SHADOW = "0 2px 6px rgba(0,0,0,0.42), 0 6px 28px rgba(0,0,0,0.5)";
+const BOTTOM_OFFSET = 640; // px from the bottom of the 1920px frame — keeps captions
 // above the Reels/TikTok/Shorts UI cluster (bottom ~25% of the screen)
 const LINE_POP_MS = 200; // entry animation length per line
 const DIMMED_LINE_OPACITY = 0.6; // a line fades to this once a later line starts
@@ -84,6 +87,9 @@ export const CaptionedClipCore: React.FC<{
   videoSrc: string;
   captions: Caption[] | null;
   framing?: Framing | null;
+  /** px to lift the caption block above its default height (negative = lower);
+   *  set per clip by the web app's caption-position slider */
+  yOffset?: number | null;
   /** full URL of the brand font; falls back to a system stack when missing */
   fontUrl?: string | null;
   /** allow click-to-edit of caption words */
@@ -97,6 +103,7 @@ export const CaptionedClipCore: React.FC<{
   videoSrc,
   captions: captionsFromProps,
   framing,
+  yOffset,
   fontUrl,
   editable = false,
   captureClicksForStudio = false,
@@ -195,7 +202,9 @@ export const CaptionedClipCore: React.FC<{
         <AbsoluteFill style={{ justifyContent: "flex-end", alignItems: "center" }}>
           <div
             style={{
-              marginBottom: BOTTOM_OFFSET,
+              // clamped so a stale or hand-edited offset can never push the
+              // captions out of frame
+              marginBottom: Math.max(0, Math.min(height - 200, BOTTOM_OFFSET + (yOffset ?? 0))),
               width: "84%",
               textAlign: "center",
               fontFamily: `${FONT_FAMILY}, ${FONT_FALLBACK}`,
@@ -204,6 +213,7 @@ export const CaptionedClipCore: React.FC<{
               lineHeight: 1.2,
               textTransform: TEXT_TRANSFORM,
               color: TEXT_COLOR,
+              textShadow: TEXT_SHADOW,
             }}
           >
             {page.lines.map((line, lineIndex) => {
@@ -258,6 +268,7 @@ export const CaptionedClipCore: React.FC<{
                             fontFamily: "inherit",
                             fontWeight: "inherit",
                             fontSize: FONT_SIZE * 0.8,
+                            textShadow: "none", // inherited from the caption block
                             width: `${Math.max(token.text.trim().length + 2, 6)}ch`,
                             textAlign: "center",
                             borderRadius: 12,
@@ -282,9 +293,6 @@ export const CaptionedClipCore: React.FC<{
                         }
                         style={{
                           whiteSpace: "pre",
-                          WebkitTextStroke: STROKE,
-                          paintOrder: "stroke fill",
-                          textShadow: "0 4px 16px rgba(0,0,0,0.45)",
                           cursor: editable ? "pointer" : undefined,
                         }}
                       >

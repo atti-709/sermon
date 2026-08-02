@@ -184,5 +184,10 @@ def write_captions(captions: list[dict], video: Path, copy_to_app: bool = True) 
     if copy_to_app and APP_PUBLIC_DIR.is_dir():
         shutil.copy2(video, APP_PUBLIC_DIR / video.name)
         shutil.copy2(json_path, APP_PUBLIC_DIR / json_path.name)
+        # caption position, if this clip already has one — the composition reads it
+        # from public/ too, and a re-run must not silently reset the clip's style
+        style_json = json_path.parent / f"{video.stem}.style.json"
+        if style_json.is_file():
+            shutil.copy2(style_json, APP_PUBLIC_DIR / style_json.name)
         paths["app"] = APP_PUBLIC_DIR / video.name
     return paths
