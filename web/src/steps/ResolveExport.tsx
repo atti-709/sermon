@@ -55,8 +55,8 @@ export const ResolveExport: React.FC<{
         Bring the <strong>vertical tracked clips</strong> you exported on the Highlights step into a
         1080×1920 timeline — B-roll and titles land directly in the final vertical frame.
       </p>
-      <div className="card">
-        <ol className="instructions" style={{ margin: 0, paddingLeft: 20 }}>
+      <div className="card" style={{ marginTop: 18 }}>
+        <ol className="instructions">
           <li>Create a 1080×1920 timeline and drop in the exported <code>.vertical.mov</code> clips.</li>
           <li>
             Open with the hook: duplicate the hook moment to the front, then the full passage. Roll and
@@ -67,15 +67,13 @@ export const ResolveExport: React.FC<{
         </ol>
       </div>
 
-      <details style={{ margin: "14px 0" }}>
-        <summary className="hint" style={{ cursor: "pointer" }}>
-          backup: horizontal XML timeline of the original video
-        </summary>
-        <div className="row" style={{ margin: "10px 0" }}>
+      <details style={{ margin: "16px 0" }}>
+        <summary className="hint">Backup: horizontal XML timeline of the original video</summary>
+        <div className="row" style={{ margin: "12px 0" }}>
           <button onClick={doExport}>{xmlPath ? "Re-export timeline XML" : "Export timeline XML"}</button>
           {xmlPath && <button onClick={() => api.reveal(xmlPath)}>Reveal in Finder</button>}
         </div>
-        {xmlPath && <p className="hint mono">{xmlPath}</p>}
+        {xmlPath && <p className="path">{xmlPath}</p>}
         <p className="hint">
           Imports via <strong>File → Import Timeline → Import AAF, EDL, XML…</strong> — one hook clip +
           full clip per highlight, referencing the original horizontal video (the old workflow: crop
@@ -84,31 +82,46 @@ export const ResolveExport: React.FC<{
       </details>
       {error && <p className="error">{error}</p>}
 
-      <h3>Rendered clips</h3>
-      {project.clips.map((clip) => (
-        <div className="card" key={clip.id}>
-          <strong>{clip.name}</strong>
-          <div className="hint mono">{clip.path}</div>
-          <div style={{ marginTop: 6 }}>
-            <span className={`chip${clip.has_captions ? " on" : ""}`}>captions</span>
-            <span className={`chip${clip.has_framing ? " on" : ""}`}>tracking</span>
-            <span className={`chip${clip.rendered.exists ? " on" : ""}`}>rendered</span>
-          </div>
+      <div className="section">
+        <div className="section-head">
+          <h3>Rendered clips</h3>
+          {project.clips.length > 0 && (
+            <span className="hint">
+              {project.clips.length} registered · captions run on these next
+            </span>
+          )}
         </div>
-      ))}
-      <div className="row">
-        <button className="primary" onClick={addClipNative} disabled={dialogOpen}>
-          {dialogOpen ? "Finder dialog is open…" : "+ Add rendered clip…"}
-        </button>
-        {!browsing && (
-          <button onClick={() => setBrowsing(true)}>browse inside the app</button>
+        {project.clips.length === 0 && (
+          <p className="hint">
+            Nothing registered yet. Render a finished edit out of Resolve, then add it here to give it
+            captions.
+          </p>
+        )}
+        {project.clips.map((clip) => (
+          <div className="card" key={clip.id}>
+            <strong>{clip.name}</strong>
+            <div className="path" style={{ marginTop: 2 }}>
+              {clip.path}
+            </div>
+            <div className="chip-row" style={{ marginTop: 10 }}>
+              <span className={`chip${clip.has_captions ? " on" : ""}`}>captions</span>
+              <span className={`chip${clip.has_framing ? " on" : ""}`}>tracking</span>
+              <span className={`chip${clip.rendered.exists ? " on" : ""}`}>rendered</span>
+            </div>
+          </div>
+        ))}
+        <div className="row" style={{ marginTop: 14 }}>
+          <button className="primary" onClick={addClipNative} disabled={dialogOpen}>
+            {dialogOpen ? "Finder dialog is open…" : "Add rendered clip…"}
+          </button>
+          {!browsing && <button onClick={() => setBrowsing(true)}>Browse inside the app</button>}
+        </div>
+        {browsing && (
+          <div style={{ marginTop: 12 }}>
+            <FileBrowser startPath={project.video.path.replace(/\/[^/]+$/, "")} onPick={addClip} />
+          </div>
         )}
       </div>
-      {browsing && (
-        <div style={{ marginTop: 10 }}>
-          <FileBrowser startPath={project.video.path.replace(/\/[^/]+$/, "")} onPick={addClip} />
-        </div>
-      )}
     </>
   );
 };

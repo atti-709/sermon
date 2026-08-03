@@ -8,8 +8,7 @@ export const Clips: React.FC<{
   clipId: string | null;
   onSelectClip: (id: string) => void;
   onRefresh: () => Promise<void>;
-  onNext: () => void;
-}> = ({ project, clipId, onSelectClip, onRefresh, onNext }) => {
+}> = ({ project, clipId, onSelectClip, onRefresh }) => {
   const [proofread, setProofread] = useState(true);
   const [corrections, setCorrections] = useState<Correction[] | null>(null);
   const clip = project.clips.find((c) => c.id === clipId) ?? null;
@@ -31,7 +30,10 @@ export const Clips: React.FC<{
     return (
       <>
         <h2>Captions</h2>
-        <p className="hint">No rendered clips registered yet — add one on the “Edit in Resolve” step.</p>
+        <p className="hint">
+          No clips to caption yet. Go back to “Edit in Resolve” and register a clip you rendered out
+          of Resolve.
+        </p>
       </>
     );
   }
@@ -45,9 +47,9 @@ export const Clips: React.FC<{
         paraphrasing. Your clip is already vertical and tracked from the highlights export, so no
         reframing happens here.
       </p>
-      <div className="row" style={{ margin: "14px 0" }}>
+      <div className="form-row">
         <label className="field">
-          clip
+          Clip
           <select value={clipId ?? ""} onChange={(e) => onSelectClip(e.target.value)}>
             {project.clips.map((c) => (
               <option key={c.id} value={c.id}>
@@ -56,16 +58,20 @@ export const Clips: React.FC<{
             ))}
           </select>
         </label>
-        <label className="field" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <label className="check">
           <input type="checkbox" checked={proofread} onChange={(e) => setProofread(e.target.checked)} />
-          Gemini proofread
+          Proofread with Gemini
         </label>
+        {clip && (
+          <span className="control-line">
+            <span className={`chip${clip.has_captions ? " on" : ""}`}>
+              {clip.has_captions ? "captions ready" : "no captions yet"}
+            </span>
+          </span>
+        )}
       </div>
       {clip && (
         <>
-          <div style={{ marginBottom: 4 }}>
-            <span className={`chip${clip.has_captions ? " on" : ""}`}>captions</span>
-          </div>
           <JobRunner
             key={`captions-${clip.id}`}
             kind="captions"
@@ -82,7 +88,7 @@ export const Clips: React.FC<{
             }}
           />
           {corrections && corrections.length > 0 && (
-            <div className="card">
+            <div className="card" style={{ marginTop: 16 }}>
               <strong>Proofread corrections</strong>
               <table className="corrections">
                 <tbody>
@@ -98,14 +104,9 @@ export const Clips: React.FC<{
             </div>
           )}
           {corrections && corrections.length === 0 && (
-            <p className="hint">Proofread: no corrections needed.</p>
-          )}
-          {clip.has_captions && (
-            <div className="row" style={{ marginTop: 24, justifyContent: "flex-end" }}>
-              <button className="primary" onClick={onNext}>
-                Next: Preview & Edit →
-              </button>
-            </div>
+            <p className="hint" style={{ marginTop: 16 }}>
+              Proofread the transcript — nothing needed fixing.
+            </p>
           )}
         </>
       )}

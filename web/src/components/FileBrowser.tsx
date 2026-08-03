@@ -35,23 +35,26 @@ export const FileBrowser: React.FC<{
       <ul>
         {listing.parent && (
           <li>
-            <button onClick={() => load(listing.parent!)}>⬑ ..</button>
+            <button onClick={() => load(listing.parent!)}>
+              <span aria-hidden="true">⬑</span>
+              <span className="fb-name">Up one folder</span>
+            </button>
           </li>
         )}
         {listing.entries.map((entry) => (
           <li key={entry.path}>
             <button onClick={() => (entry.is_dir ? load(entry.path) : onPick(entry.path))}>
-              <span>{entry.is_dir ? "📁" : "🎬"}</span>
-              <span>{entry.name}</span>
+              <span aria-hidden="true">{entry.is_dir ? "📁" : "🎬"}</span>
+              <span className="fb-name">{entry.name}</span>
               {entry.size != null && <span className="size">{fmtSize(entry.size)}</span>}
             </button>
           </li>
         ))}
         {listing.entries.length === 0 && (
           <li>
-            <span className="hint" style={{ padding: "6px 10px", display: "block" }}>
-              no videos here
-            </span>
+            <p className="hint" style={{ margin: 0, padding: "8px 10px" }}>
+              No videos in this folder. Open a subfolder or go up one level.
+            </p>
           </li>
         )}
       </ul>

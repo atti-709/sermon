@@ -6,8 +6,7 @@ import { JobRunner } from "../components/JobRunner";
 export const Transcribe: React.FC<{
   project: ProjectState;
   onRefresh: () => Promise<void>;
-  onNext: () => void;
-}> = ({ project, onRefresh, onNext }) => {
+}> = ({ project, onRefresh }) => {
   const [model, setModel] = useState("large-v3-turbo");
   const [language, setLanguage] = useState("sk");
   const [transcript, setTranscript] = useState<SegmentsFile | null>(null);
@@ -27,9 +26,9 @@ export const Transcribe: React.FC<{
         <code>large-v3-turbo</code>; <code>large-v3</code> is a bit more accurate for Slovak but ~4×
         slower. First run downloads ~1.6 GB of model weights — watch the log below.
       </p>
-      <div className="row" style={{ margin: "14px 0" }}>
+      <div className="form-row">
         <label className="field">
-          model
+          Model
           <select value={model} onChange={(e) => setModel(e.target.value)}>
             <option>large-v3-turbo</option>
             <option>large-v3</option>
@@ -38,8 +37,8 @@ export const Transcribe: React.FC<{
           </select>
         </label>
         <label className="field">
-          language
-          <input value={language} onChange={(e) => setLanguage(e.target.value)} style={{ width: 60 }} />
+          Language
+          <input value={language} onChange={(e) => setLanguage(e.target.value)} style={{ width: 72 }} />
         </label>
       </div>
       <JobRunner
@@ -53,14 +52,12 @@ export const Transcribe: React.FC<{
         }}
       />
       {done && transcript && (
-        <>
-          <div className="row" style={{ justifyContent: "space-between", marginTop: 24 }}>
-            <h3 style={{ margin: 0 }}>
-              Transcript <span className="hint">({transcript.segments.length} segments, {transcript.model})</span>
-            </h3>
-            <button className="primary" onClick={onNext}>
-              Next: Highlights →
-            </button>
+        <div className="section">
+          <div className="section-head">
+            <h3>Transcript</h3>
+            <span className="hint">
+              {transcript.segments.length} segments · {transcript.model}
+            </span>
           </div>
           <div className="card transcript">
             {transcript.segments.map((s, i) => (
@@ -70,7 +67,7 @@ export const Transcribe: React.FC<{
               </div>
             ))}
           </div>
-        </>
+        </div>
       )}
     </>
   );

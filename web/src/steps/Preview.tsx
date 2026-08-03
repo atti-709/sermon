@@ -99,8 +99,7 @@ export const Preview: React.FC<{
   project: ProjectState;
   clip: ClipState;
   onRefresh: () => Promise<void>;
-  onNext: () => void;
-}> = ({ project, clip, onRefresh, onNext }) => {
+}> = ({ project, clip, onRefresh }) => {
   const [captions, setCaptions] = useState<Caption[] | null>(null);
   const [framing, setFraming] = useState<Framing | null>(null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -225,7 +224,7 @@ export const Preview: React.FC<{
         transcript</strong> to fix it — the player follows along; Enter saves, Esc cancels. Words in
         the video itself are clickable too.
       </p>
-      <div className="row" style={{ alignItems: "flex-start", marginTop: 14, gap: 20 }}>
+      <div className="row" style={{ alignItems: "flex-start", marginTop: 20, gap: 24 }}>
         <div style={{ width: 330, flexShrink: 0 }}>
           <Player
             ref={playerRef}
@@ -238,10 +237,10 @@ export const Preview: React.FC<{
             controls
             style={{ width: 330, borderRadius: 12, overflow: "hidden" }}
           />
-          <label className="field" style={{ marginTop: 14 }}>
-            <span style={{ display: "flex", justifyContent: "space-between" }}>
-              <span>caption height</span>
-              <span className="mono">{yOffset > 0 ? `+${yOffset}` : yOffset} px</span>
+          <label className="field" style={{ marginTop: 16 }}>
+            <span style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+              <span>Caption height</span>
+              <span className="mono">{yOffset > 0 ? `+${yOffset}px` : `${yOffset}px`}</span>
             </span>
             <input
               type="range"
@@ -252,34 +251,34 @@ export const Preview: React.FC<{
               onChange={(e) => changeYOffset(Number(e.target.value))}
             />
           </label>
-          <p className="hint" style={{ marginTop: 6 }}>
+          <p className="hint" style={{ marginTop: 8 }}>
             Right lifts the captions, left drops them. Saved per clip — Studio and the render use
             the same position.
           </p>
         </div>
         <div style={{ flex: 1, minWidth: 280 }}>
-          <p className="hint" style={{ marginTop: 0 }}>
-            {captions.length} words ·{" "}
-            {framing
-              ? `speaker tracking active (${framing.keyframes.length} keyframes)`
-              : "centered crop (no tracking data)"}
-            <span style={{ minHeight: 20, marginLeft: 10 }}>
-              {saveState === "saving" && "saving…"}
-              {saveState === "saved" && "✓ saved (Studio & render will use it)"}
-              {saveState === "error" && <span className="error">save failed</span>}
+          <div
+            className="row"
+            style={{ justifyContent: "space-between", gap: 10, minHeight: 22, marginBottom: 10 }}
+          >
+            <span className="hint">
+              {captions.length} words ·{" "}
+              {framing
+                ? `speaker tracking active (${framing.keyframes.length} keyframes)`
+                : "centered crop (no tracking data)"}
             </span>
-          </p>
+            <span className="hint" role="status">
+              {saveState === "saving" && "Saving…"}
+              {saveState === "saved" && "✓ Saved — Studio and the render use it"}
+              {saveState === "error" && <span className="error">Save failed</span>}
+            </span>
+          </div>
           <CaptionEditor
             captions={captions}
             activeIndex={activeIndex}
             onSeek={seekToMs}
             onSave={save}
           />
-          <div className="row" style={{ marginTop: 14, justifyContent: "flex-end" }}>
-            <button className="primary" onClick={onNext}>
-              Next: Render →
-            </button>
-          </div>
         </div>
       </div>
     </>

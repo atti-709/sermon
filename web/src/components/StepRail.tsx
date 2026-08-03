@@ -36,10 +36,13 @@ export const StepRail: React.FC<{
         <button
           key={key}
           className={`rail-step${step === key ? " active" : ""}${done ? " done" : ""}`}
+          aria-current={step === key ? "step" : undefined}
           disabled={!unlocked[key]}
           onClick={() => onSelect(key)}
         >
-          <span className="dot">{done ? "✓" : index + 1}</span>
+          <span className="dot" aria-hidden="true">
+            {done ? "✓" : index + 1}
+          </span>
           <span>{title}</span>
         </button>
       );

@@ -72,30 +72,34 @@ export const SegmentPlayer: React.FC<{
         controls
         style={{ width: 340, borderRadius: 8, overflow: "hidden" }}
       />
-      <div className="row" style={{ gap: 6, marginTop: 6 }}>
-        {hookStartSec != null && hookEndSec != null && (
-          <button onClick={() => playRange(hookStartSec, hookEndSec)}>
-            ▶ hook · {Math.round(hookEndSec - hookStartSec)}s
+      <div className="row" style={{ gap: 8, marginTop: 10 }}>
+        {/* what to play, grouped as one control; trimming is a separate action */}
+        <div className="seg" role="group" aria-label="Play a part of this highlight">
+          {hookStartSec != null && hookEndSec != null && (
+            <button className="sm" onClick={() => playRange(hookStartSec, hookEndSec)}>
+              <span aria-hidden="true">▶</span> Hook · {Math.round(hookEndSec - hookStartSec)}s
+            </button>
+          )}
+          <button className="sm" onClick={() => playRange(startSec, endSec)}>
+            <span aria-hidden="true">▶</span> Full · {fmtTime(endSec - startSec)}
           </button>
-        )}
-        <button onClick={() => playRange(startSec, endSec)}>
-          ▶ full · {fmtTime(endSec - startSec)}
-        </button>
+          {onSetEnd && (
+            <button className="sm" onClick={() => playRange(Math.max(startSec, endSec - 4), endSec)}>
+              <span aria-hidden="true">▶</span> Ending
+            </button>
+          )}
+        </div>
         {onSetEnd && (
-          <>
-            <button onClick={() => playRange(Math.max(startSec, endSec - 4), endSec)}>
-              ▶ ending
-            </button>
-            <button
-              title="end the clip at the current playhead"
-              onClick={() => {
-                const frame = ref.current?.getCurrentFrame();
-                if (frame != null) onSetEnd(startSec + frame / FPS);
-              }}
-            >
-              ✂ end here
-            </button>
-          </>
+          <button
+            className="sm"
+            title="End the clip at the current playhead"
+            onClick={() => {
+              const frame = ref.current?.getCurrentFrame();
+              if (frame != null) onSetEnd(startSec + frame / FPS);
+            }}
+          >
+            <span aria-hidden="true">✂</span> End here
+          </button>
         )}
       </div>
     </div>

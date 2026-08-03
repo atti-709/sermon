@@ -87,38 +87,47 @@ const HighlightCard: React.FC<{
         />
       )}
       <div style={{ flex: 1, minWidth: 260 }}>
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div>
-            <strong>
+        <div className="hl-head">
+          <div style={{ minWidth: 0 }}>
+            <h3>
               {rank}. {h.title}
-            </strong>
-            <div className="hint mono">
-              {h.start} → {fmtClock(endSec)} · {Math.round(duration)}s (hook {h.hook_start} →{" "}
-              {h.hook_end})
+            </h3>
+            <div className="hint mono" style={{ marginTop: 3 }}>
+              {h.start} → {fmtClock(endSec)} · {Math.round(duration)}s · hook {h.hook_start} →{" "}
+              {h.hook_end}
             </div>
           </div>
-          <div style={{ textAlign: "right" }}>
-            <div className="score">{h.virality_score}</div>
-            <div className="subscores">
-              <span>hook {h.scores.hook}</span>
-              <span>flow {h.scores.flow}</span>
-              <span>value {h.scores.value}</span>
-              <span>reach {h.scores.reach}</span>
-            </div>
+          <div className="score">
+            <b>{h.virality_score}</b>
+            <span>virality</span>
           </div>
         </div>
+        <div className="subscores">
+          <span>
+            <b>{h.scores.hook}</b> hook
+          </span>
+          <span>
+            <b>{h.scores.flow}</b> flow
+          </span>
+          <span>
+            <b>{h.scores.value}</b> value
+          </span>
+          <span>
+            <b>{h.scores.reach}</b> reach
+          </span>
+        </div>
         <div className="hook">“{h.hook_text}”</div>
-        <p style={{ margin: "6px 0 0" }}>{h.summary}</p>
+        <p style={{ margin: "10px 0 0" }}>{h.summary}</p>
         <details>
-          <summary>excerpt & scoring</summary>
+          <summary>Excerpt & scoring</summary>
           <p>{h.excerpt}</p>
           <p className="hint">{h.score_reason}</p>
         </details>
         <div className="end-trim">
-          <label className="field" style={{ flex: 1, minWidth: 220 }}>
-            <span style={{ display: "flex", justifyContent: "space-between" }}>
+          <label className="field">
+            <span>
               <span>
-                ends at <span className="mono">{fmtClock(endSec)}</span>
+                Ends at <span className="mono">{fmtClock(endSec)}</span>
                 {trimmed && <span className="hint"> (was {h.end})</span>}
               </span>
               <span
@@ -137,20 +146,25 @@ const HighlightCard: React.FC<{
               onChange={(e) => changeEnd(Number(e.target.value))}
             />
           </label>
-          <div className="row" style={{ gap: 4 }}>
+          <div className="seg">
             {[-5, -1, 1, 5].map((delta) => (
-              <button key={delta} onClick={() => changeEnd(endSec + delta)}>
+              <button
+                key={delta}
+                className="sm"
+                aria-label={`move the out point ${delta > 0 ? `${delta} seconds later` : `${-delta} seconds earlier`}`}
+                onClick={() => changeEnd(endSec + delta)}
+              >
                 {delta > 0 ? `+${delta}s` : `${delta}s`}
               </button>
             ))}
-            <span className="hint" style={{ minWidth: 54 }}>
-              {saveState === "saving" && "saving…"}
-              {saveState === "saved" && "✓ saved"}
-              {saveState === "error" && <span className="error">save failed</span>}
-            </span>
           </div>
+          <span className="save-state" role="status">
+            {saveState === "saving" && "Saving…"}
+            {saveState === "saved" && "✓ Saved"}
+            {saveState === "error" && <span className="error">Save failed</span>}
+          </span>
         </div>
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 14 }}>
           <JobRunner
             kind="export_vertical"
             projectId={projectId}
@@ -161,11 +175,17 @@ const HighlightCard: React.FC<{
             }}
           />
           {h.vertical?.exists && (
-            <div className="row" style={{ marginTop: 6, gap: 8 }}>
-              <span className="chip on">vertical · tracked · 1080×1920</span>
-              <span className="hint mono" style={{ wordBreak: "break-all" }}>{h.vertical.path}</span>
-              <button onClick={() => api.reveal(h.vertical!.path)}>Reveal in Finder</button>
-            </div>
+            <>
+              <div className="row" style={{ marginTop: 12, justifyContent: "space-between" }}>
+                <span className="chip on">vertical · tracked · 1080×1920</span>
+                <button className="sm" onClick={() => api.reveal(h.vertical!.path)}>
+                  Reveal in Finder
+                </button>
+              </div>
+              <div className="path" style={{ marginTop: 6 }}>
+                {h.vertical.path}
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -177,8 +197,7 @@ const HighlightCard: React.FC<{
 export const Highlights: React.FC<{
   project: ProjectState;
   onRefresh: () => Promise<void>;
-  onNext: () => void;
-}> = ({ project, onRefresh, onNext }) => {
+}> = ({ project, onRefresh }) => {
   const [count, setCount] = useState(8);
   const [minDuration, setMinDuration] = useState(20);
   const [maxDuration, setMaxDuration] = useState(100);
@@ -220,39 +239,39 @@ export const Highlights: React.FC<{
           <code>sermon web</code>.
         </p>
       )}
-      <div className="row" style={{ margin: "14px 0" }}>
+      <div className="form-row">
         <label className="field">
-          clips
+          Clips
           <input
             type="number"
             min={1}
             max={20}
             value={count}
             onChange={(e) => setCount(Number(e.target.value))}
-            style={{ width: 64 }}
+            style={{ width: 72 }}
           />
         </label>
         <label className="field">
-          min s
+          Shortest (s)
           <input
             type="number"
             value={minDuration}
             onChange={(e) => setMinDuration(Number(e.target.value))}
-            style={{ width: 72 }}
+            style={{ width: 82 }}
           />
         </label>
         <label className="field">
-          max s
+          Longest (s)
           <input
             type="number"
             value={maxDuration}
             onChange={(e) => setMaxDuration(Number(e.target.value))}
-            style={{ width: 72 }}
+            style={{ width: 82 }}
           />
         </label>
         <label className="field">
-          gemini model
-          <input value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)} style={{ width: 180 }} />
+          Gemini model
+          <input value={geminiModel} onChange={(e) => setGeminiModel(e.target.value)} style={{ width: 190 }} />
         </label>
       </div>
       <JobRunner
@@ -267,26 +286,24 @@ export const Highlights: React.FC<{
         }}
       />
       {highlights && (
-        <>
-          <div className="row" style={{ justifyContent: "space-between", marginTop: 24 }}>
-            <h3 style={{ margin: 0 }}>
-              {highlights.length} suggestions <span className="hint">(sorted by virality)</span>
-            </h3>
-            <button className="primary" onClick={onNext}>
-              Next: Edit in Resolve →
-            </button>
+        <div className="section">
+          <div className="section-head">
+            <h3>{highlights.length} suggestions</h3>
+            <span className="hint">sorted by virality</span>
           </div>
-          <label
-            className="field"
-            style={{ flexDirection: "row", alignItems: "center", gap: 6, margin: "10px 0 4px" }}
-          >
+          <label className="check" style={{ marginBottom: 14 }}>
             <input
               type="checkbox"
               checked={hookFirst}
               onChange={(e) => setHookFirst(e.target.checked)}
             />
-            open with the hook — cut the hook moment in front of the passage (it then repeats in
-            context); turn off when the hook already is the opening line
+            <span>
+              Open every export with its hook
+              <span className="check-hint">
+                Cuts the hook moment in front of the passage, where it then repeats in context. Turn
+                off when the hook already is the opening line.
+              </span>
+            </span>
           </label>
           {highlights.map((h, i) => (
             <HighlightCard
@@ -301,7 +318,7 @@ export const Highlights: React.FC<{
               onExported={() => void loadHighlights()}
             />
           ))}
-        </>
+        </div>
       )}
     </>
   );

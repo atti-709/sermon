@@ -44,23 +44,32 @@ export const PickVideo: React.FC<{
         Everything the pipeline produces (transcript, highlights, Resolve timeline) lands next to the
         video file, so put it somewhere sensible first.
       </p>
-      <div className="row" style={{ margin: "16px 0" }}>
+      <div className="row" style={{ margin: "20px 0" }}>
         <button className="primary" onClick={chooseNative} disabled={dialogOpen}>
           {dialogOpen ? "Finder dialog is open…" : "Choose video…"}
         </button>
-        {dialogOpen && <span className="hint">check your other windows if you don't see the dialog</span>}
+        {dialogOpen && (
+          <span className="hint">Check your other windows if you don't see the dialog.</span>
+        )}
       </div>
       {error && <p className="error">{error}</p>}
       {recents.length > 0 && (
-        <>
-          <h3>Recent</h3>
+        <div className="section">
+          <div className="section-head">
+            <h3>Recent</h3>
+          </div>
           {recents.map((p) => (
             <div className="card" key={p.id}>
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <div>
+              <div
+                className="row"
+                style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}
+              >
+                <div style={{ minWidth: 0 }}>
                   <strong>{p.video.name}</strong>
-                  <div className="hint mono">{p.video.path}</div>
-                  <div style={{ marginTop: 6 }}>
+                  <div className="path" style={{ marginTop: 2 }}>
+                    {p.video.path}
+                  </div>
+                  <div className="chip-row" style={{ marginTop: 10 }}>
                     <span className={`chip${p.steps.transcribe === "done" ? " on" : ""}`}>transcript</span>
                     <span className={`chip${p.steps.highlights === "done" ? " on" : ""}`}>highlights</span>
                     <span className={`chip${p.clips.length > 0 ? " on" : ""}`}>
@@ -69,17 +78,17 @@ export const PickVideo: React.FC<{
                     <span className={`chip${p.clips.some((c) => c.rendered.exists) ? " on" : ""}`}>rendered</span>
                   </div>
                 </div>
-                <button onClick={() => pick(p.video.path)}>Open</button>
+                <button className="sm" onClick={() => pick(p.video.path)}>
+                  Open
+                </button>
               </div>
             </div>
           ))}
-        </>
+        </div>
       )}
-      <details style={{ marginTop: 16 }}>
-        <summary className="hint" style={{ cursor: "pointer" }}>
-          browse inside the app instead
-        </summary>
-        <div style={{ marginTop: 10 }}>
+      <details style={{ marginTop: 24 }}>
+        <summary className="hint">Browse inside the app instead</summary>
+        <div style={{ marginTop: 12 }}>
           <FileBrowser startPath={project?.video.path.replace(/\/[^/]+$/, "")} onPick={pick} />
         </div>
       </details>

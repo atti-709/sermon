@@ -20,6 +20,7 @@ export const LogPane: React.FC<{ lines: LogLine[] }> = ({ lines }) => {
         pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       }}
     >
+      {lines.length === 0 && <div className="err">Waiting for the first output…</div>}
       {lines.map((l, i) => (
         <div key={i} className={l.stream === "err" ? "err" : undefined}>
           {l.line}

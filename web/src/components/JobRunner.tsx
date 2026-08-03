@@ -98,23 +98,34 @@ export const JobRunner: React.FC<{
         </button>
       ) : (
         <>
-          <div className="row" style={{ margin: "4px 0 10px" }}>
-            <div className="progress-track">
+          <div className="row" style={{ gap: 12, minHeight: "var(--control-h)" }}>
+            <div
+              className="progress-track"
+              role="progressbar"
+              aria-label={label}
+              aria-valuenow={percent != null ? Math.round(percent) : undefined}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
               <div
                 className={`progress-fill${percent == null ? " indeterminate" : ""}`}
                 style={{ width: `${percent ?? 0}%` }}
               />
             </div>
-            <span className="hint" style={{ minWidth: 48, textAlign: "right" }}>
-              {percent != null ? `${Math.round(percent)}%` : "…"}
-            </span>
-            <button onClick={() => jobId && api.cancelJob(jobId)}>Cancel</button>
+            <span className="hint percent">{percent != null ? `${Math.round(percent)}%` : "…"}</span>
+            <button className="sm" onClick={() => jobId && api.cancelJob(jobId)}>
+              Cancel
+            </button>
           </div>
-          {progress?.detail && <p className="hint mono">{progress.detail}</p>}
+          {progress?.detail && (
+            <p className="hint mono" style={{ margin: "8px 0 0" }}>
+              {progress.detail}
+            </p>
+          )}
         </>
       )}
       {(running || lines.length > 0) && (
-        <div style={{ marginTop: 10 }}>
+        <div style={{ marginTop: 12 }}>
           <LogPane lines={lines} />
         </div>
       )}

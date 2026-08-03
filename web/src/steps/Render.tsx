@@ -34,22 +34,28 @@ export const Render: React.FC<{
         Remotion burns the captions and the tracked 9:16 crop into a 1080×1920 MP4 — ready for Reels,
         Shorts and TikTok. The render always reads the latest saved captions and tracking data.
       </p>
-      <div className="row" style={{ gap: 8, marginTop: 14, alignItems: "baseline" }}>
-        <span className="hint">saving to</span>
-        <strong className="mono" style={{ wordBreak: "break-all", flex: 1 }}>
+      <div className="row" style={{ gap: 10, marginTop: 20 }}>
+        <span className="hint" style={{ flexShrink: 0 }}>
+          Saving to
+        </span>
+        <strong className="mono" style={{ overflowWrap: "anywhere", minWidth: 0 }}>
           {project.output_dir}
         </strong>
-        <button onClick={() => void chooseOutputDir()}>Change…</button>
-        <button onClick={() => api.reveal(project.output_dir)}>Open</button>
+        <button className="sm" onClick={() => void chooseOutputDir()}>
+          Change…
+        </button>
+        <button className="sm" onClick={() => api.reveal(project.output_dir)}>
+          Open
+        </button>
       </div>
       {error && <p className="error">{error}</p>}
       {stale && (
-        <div className="card stale-banner">
+        <div className="card stale-banner" style={{ marginTop: 16 }}>
           <strong>This render is out of date.</strong> The captions or tracking data changed after it
           was produced — re-render to include your latest edits.
         </div>
       )}
-      <div style={{ margin: "14px 0" }}>
+      <div style={{ margin: "18px 0" }}>
         <JobRunner
           key={clip.id}
           kind="render"
@@ -67,22 +73,34 @@ export const Render: React.FC<{
       </div>
       {clip.rendered.exists && (
         <div className="card">
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <div>
-              <strong>{clip.rendered.path.split("/").pop()}</strong>
-              <div className="hint mono">{clip.rendered.path}</div>
-              {stale && <div className="hint">⚠ rendered before the latest caption/tracking changes</div>}
+          <div className="row" style={{ alignItems: "flex-start", gap: 18, flexWrap: "nowrap" }}>
+            {renderedUrl && (
+              <video
+                key={renderedUrl}
+                src={renderedUrl}
+                controls
+                style={{ width: 200, flexShrink: 0, borderRadius: 10, background: "var(--bg-inset)" }}
+              />
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
+                <strong style={{ minWidth: 0, overflowWrap: "anywhere" }}>
+                  {clip.rendered.path.split("/").pop()}
+                </strong>
+                <button className="sm" onClick={() => api.reveal(clip.rendered.path)}>
+                  Reveal in Finder
+                </button>
+              </div>
+              <div className="path" style={{ marginTop: 4 }}>
+                {clip.rendered.path}
+              </div>
+              {stale && (
+                <div className="hint" style={{ marginTop: 8 }}>
+                  ⚠ Rendered before the latest caption and tracking changes
+                </div>
+              )}
             </div>
-            <button onClick={() => api.reveal(clip.rendered.path)}>Reveal in Finder</button>
           </div>
-          {renderedUrl && (
-            <video
-              key={renderedUrl}
-              src={renderedUrl}
-              controls
-              style={{ maxWidth: 300, marginTop: 12, borderRadius: 10 }}
-            />
-          )}
         </div>
       )}
     </>

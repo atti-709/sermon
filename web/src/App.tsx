@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import type { ProjectState } from "./types";
 import { StepRail } from "./components/StepRail";
+import { StepFooter } from "./components/StepFooter";
 import { PickVideo } from "./steps/PickVideo";
 import { Transcribe } from "./steps/Transcribe";
 import { Highlights } from "./steps/Highlights";
@@ -90,44 +91,34 @@ export const App: React.FC = () => {
     <>
       <StepRail project={project} step={step} unlocked={unlocked} onSelect={setStep} />
       <main>
-        {step === "video" && (
-          <PickVideo project={project} onPicked={(state) => adoptProject(state, true)} />
-        )}
-        {step === "transcribe" && project && (
-          <Transcribe project={project} onRefresh={refresh} onNext={() => setStep("highlights")} />
-        )}
-        {step === "highlights" && project && (
-          <Highlights project={project} onRefresh={refresh} onNext={() => setStep("export")} />
-        )}
-        {step === "export" && project && (
-          <ResolveExport
-            project={project}
-            onRefresh={refresh}
-            onClipAdded={(c) => {
-              setClipId(c.id);
-              void refresh();
-              setStep("captions");
-            }}
-          />
-        )}
-        {step === "captions" && project && (
-          <Clips
-            project={project}
-            clipId={clipId}
-            onSelectClip={setClipId}
-            onRefresh={refresh}
-            onNext={() => setStep("preview")}
-          />
-        )}
-        {step === "preview" && project && clip && (
-          <Preview
-            project={project}
-            clip={clip}
-            onRefresh={refresh}
-            onNext={() => setStep("render")}
-          />
-        )}
-        {step === "render" && project && clip && <Render project={project} clip={clip} onRefresh={refresh} />}
+        <div className="step-body">
+          {step === "video" && (
+            <PickVideo project={project} onPicked={(state) => adoptProject(state, true)} />
+          )}
+          {step === "transcribe" && project && <Transcribe project={project} onRefresh={refresh} />}
+          {step === "highlights" && project && <Highlights project={project} onRefresh={refresh} />}
+          {step === "export" && project && (
+            <ResolveExport
+              project={project}
+              onRefresh={refresh}
+              onClipAdded={(c) => {
+                setClipId(c.id);
+                void refresh();
+                setStep("captions");
+              }}
+            />
+          )}
+          {step === "captions" && project && (
+            <Clips project={project} clipId={clipId} onSelectClip={setClipId} onRefresh={refresh} />
+          )}
+          {step === "preview" && project && clip && (
+            <Preview project={project} clip={clip} onRefresh={refresh} />
+          )}
+          {step === "render" && project && clip && (
+            <Render project={project} clip={clip} onRefresh={refresh} />
+          )}
+        </div>
+        <StepFooter step={step} unlocked={unlocked} onSelect={setStep} />
       </main>
     </>
   );
