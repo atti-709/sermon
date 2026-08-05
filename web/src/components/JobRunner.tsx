@@ -22,6 +22,8 @@ export const JobRunner: React.FC<{
   const [progress, setProgress] = useState<JobProgress | null>(null);
   const [lines, setLines] = useState<LogLine[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // cancel takes a moment: every process the job spawned has to be stopped first
+  const [canceling, setCanceling] = useState(false);
   const unsubscribe = useRef<(() => void) | null>(null);
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
@@ -36,6 +38,7 @@ export const JobRunner: React.FC<{
       onDone: (done) => {
         setRunning(false);
         setJobId(null);
+        setCanceling(false);
         if (done.state === "failed") setError(done.error ?? `job failed (exit ${done.exit_code})`);
         onDoneRef.current?.(done);
       },
@@ -46,6 +49,7 @@ export const JobRunner: React.FC<{
     setError(null);
     setLines([]);
     setProgress(null);
+    setCanceling(false);
     setRunning(true);
     try {
       const { job_id } = await api.startJob({ kind, project_id: projectId, clip_id: clipId, params });
@@ -113,8 +117,16 @@ export const JobRunner: React.FC<{
               />
             </div>
             <span className="hint percent">{percent != null ? `${Math.round(percent)}%` : "…"}</span>
-            <button className="sm" onClick={() => jobId && api.cancelJob(jobId)}>
-              Cancel
+            <button
+              className="sm"
+              disabled={canceling}
+              onClick={() => {
+                if (!jobId) return;
+                setCanceling(true);
+                void api.cancelJob(jobId).catch(() => setCanceling(false));
+              }}
+            >
+              {canceling ? "Stopping…" : "Cancel"}
             </button>
           </div>
           {progress?.detail && (

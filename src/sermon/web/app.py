@@ -3,6 +3,7 @@
 import socket
 import threading
 import webbrowser
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -14,10 +15,20 @@ WEB_DIST = REPO_ROOT / "web" / "dist"
 DEFAULT_PORT = 8756
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from .jobs import manager
+
+    yield
+    # each job runs in its own session, so Ctrl-C reaches the server only — an
+    # encode or render in flight has to be taken down explicitly
+    await manager.shutdown()
+
+
 def create_app() -> FastAPI:
     from .api import media_router, router
 
-    app = FastAPI(title="sermon web", docs_url=None, redoc_url=None)
+    app = FastAPI(title="sermon web", docs_url=None, redoc_url=None, lifespan=lifespan)
     app.include_router(router, prefix="/api")
     app.include_router(media_router, prefix="/media")
 
