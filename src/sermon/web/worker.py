@@ -53,6 +53,7 @@ class _LineWriter(io.TextIOBase):
 
 
 def run_transcribe(args: argparse.Namespace) -> None:
+    from .. import layout
     from ..export import probe_video
     from ..transcribe import transcribe_video, write_outputs
 
@@ -71,7 +72,7 @@ def run_transcribe(args: argparse.Namespace) -> None:
 
     with contextlib.redirect_stdout(_LineWriter(handle_line)):
         result = transcribe_video(video, model=args.model, language=args.language, verbose=True)
-    out_dir = Path(args.out_dir) if args.out_dir else video.resolve().parent
+    out_dir = Path(args.out_dir) if args.out_dir else layout.source_dir(video)
     paths = write_outputs(result, video, out_dir)
     emit({"event": "result", "paths": {name: str(path) for name, path in paths.items()}})
 
@@ -109,6 +110,7 @@ def run_highlights(args: argparse.Namespace) -> None:
 
 
 def run_captions(args: argparse.Namespace) -> None:
+    from .. import layout
     from ..captions import generate_captions, proofread_captions, write_captions
 
     clip = Path(args.clip)
@@ -136,7 +138,7 @@ def run_captions(args: argparse.Namespace) -> None:
     correction_dicts = [{"index": i, "before": b, "after": a, "reason": r} for i, b, a, r in corrections]
     if proofread_ran:
         # persist so the web UI can show the proofread results on any later visit
-        corr_path = clip.resolve().parent / f"{clip.stem}.corrections.json"
+        corr_path = layout.ensure_parent(layout.sidecar(clip, "corrections.json"))
         corr_path.write_text(
             json.dumps({"gemini_model": args.gemini_model, "corrections": correction_dicts},
                        indent=2, ensure_ascii=False) + "\n",

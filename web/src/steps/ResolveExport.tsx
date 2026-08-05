@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { ClipState, ProjectState } from "../types";
+import type { ClipState, Highlight, ProjectState } from "../types";
 import { FileBrowser } from "../components/FileBrowser";
 
 export const ResolveExport: React.FC<{
@@ -14,6 +14,15 @@ export const ResolveExport: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const [browsing, setBrowsing] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  // the exported highlights, for the folders each render is expected in
+  const [exported, setExported] = useState<Highlight[]>([]);
+
+  useEffect(() => {
+    api
+      .highlights(project.id)
+      .then((file) => setExported(file.highlights.filter((h) => h.vertical?.exists)))
+      .catch(() => setExported([]));
+  }, [project.id]);
 
   const doExport = () =>
     api
@@ -35,11 +44,11 @@ export const ResolveExport: React.FC<{
       })
       .catch((exc) => setError(exc.message));
 
-  const addClipNative = async () => {
+  const addClipNative = async (startPath?: string) => {
     setDialogOpen(true);
     setError(null);
     try {
-      const { path } = await api.pickFile("clip");
+      const { path } = await api.pickFile("clip", startPath);
       if (path) await addClip(path);
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
@@ -57,15 +66,54 @@ export const ResolveExport: React.FC<{
       </p>
       <div className="card" style={{ marginTop: 18 }}>
         <ol className="instructions">
-          <li>Create a 1080×1920 timeline and drop in the exported <code>.vertical.mov</code> clips.</li>
+          <li>
+            Create a 1080×1920 timeline and drop in the clip from the highlight's{" "}
+            <code>01_VERTICAL_NO_CAPTION</code> folder.
+          </li>
           <li>
             Open with the hook: duplicate the hook moment to the front, then the full passage. Roll and
             trim freely — the export covers the whole highlight range.
           </li>
           <li>Add B-roll, trims, whatever the clip needs. Aim for ~1:30, cap 1:50.</li>
-          <li>Render each finished clip vertical (1080×1920 — captions come next), then register it below.</li>
+          <li>
+            Render vertical (1080×1920 — captions come next) into that highlight's{" "}
+            <code>02_DAVINCI_EXPORT</code> folder, then register it below.
+          </li>
         </ol>
       </div>
+
+      {exported.length > 0 && (
+        <div className="section">
+          <div className="section-head">
+            <h3>Render into</h3>
+            <span className="hint">one folder per exported highlight</span>
+          </div>
+          {exported.map((h) => (
+            <div className="card" key={h.folder ?? h.title}>
+              <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                <div style={{ minWidth: 0 }}>
+                  <strong style={{ overflowWrap: "anywhere" }}>{h.title}</strong>
+                  <div className="path" style={{ marginTop: 2 }}>
+                    {h.davinci_dir}
+                  </div>
+                </div>
+                <span className="row" style={{ gap: 8, flexShrink: 0 }}>
+                  <button className="sm" onClick={() => h.davinci_dir && api.reveal(h.davinci_dir)}>
+                    Open
+                  </button>
+                  <button
+                    className="sm"
+                    disabled={dialogOpen}
+                    onClick={() => void addClipNative(h.davinci_dir)}
+                  >
+                    Register a render…
+                  </button>
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <details style={{ margin: "16px 0" }}>
         <summary className="hint">Backup: horizontal XML timeline of the original video</summary>
@@ -104,6 +152,7 @@ export const ResolveExport: React.FC<{
               {clip.path}
             </div>
             <div className="chip-row" style={{ marginTop: 10 }}>
+              {clip.highlight && <span className="chip on">{clip.highlight}</span>}
               <span className={`chip${clip.has_captions ? " on" : ""}`}>captions</span>
               <span className={`chip${clip.has_framing ? " on" : ""}`}>tracking</span>
               <span className={`chip${clip.rendered.exists ? " on" : ""}`}>rendered</span>
@@ -111,7 +160,11 @@ export const ResolveExport: React.FC<{
           </div>
         ))}
         <div className="row" style={{ marginTop: 14 }}>
-          <button className="primary" onClick={addClipNative} disabled={dialogOpen}>
+          <button
+            className="primary"
+            onClick={() => void addClipNative(project.video.path.replace(/\/[^/]+$/, ""))}
+            disabled={dialogOpen}
+          >
             {dialogOpen ? "Finder dialog is open…" : "Add rendered clip…"}
           </button>
           {!browsing && <button onClick={() => setBrowsing(true)}>Browse inside the app</button>}

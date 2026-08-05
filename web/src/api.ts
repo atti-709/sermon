@@ -41,7 +41,9 @@ export const api = {
   geminiStatus: () => request<{ key_present: boolean }>("/api/gemini-status"),
   fsList: (path?: string) =>
     request<FsListing>(`/api/fs/list${path ? `?path=${encodeURIComponent(path)}` : ""}`),
-  pickFile: (kind: "video" | "clip" | "folder") => post<{ path: string | null }>("/api/fs/pick", { kind }),
+  /** native macOS dialog; `startPath` opens it in a folder (a highlight's 02_DAVINCI_EXPORT) */
+  pickFile: (kind: "video" | "clip" | "folder", startPath?: string) =>
+    post<{ path: string | null }>("/api/fs/pick", { kind, start_path: startPath ?? null }),
   createProject: (videoPath: string) => post<ProjectState>("/api/projects", { video_path: videoPath }),
   listProjects: () => request<{ projects: ProjectState[] }>("/api/projects"),
   getProject: (id: string) => request<ProjectState>(`/api/projects/${id}`),
@@ -56,6 +58,9 @@ export const api = {
     }),
   setOutputDir: (id: string, path: string) =>
     post<{ output_dir: string }>(`/api/projects/${id}/output-dir`, { path }),
+  /** back to the default: each finished video in its own highlight folder */
+  clearOutputDir: (id: string) =>
+    request<{ output_dir: null }>(`/api/projects/${id}/output-dir`, { method: "DELETE" }),
   exportXml: (id: string) => post<{ xml_path: string }>(`/api/projects/${id}/export`, {}),
   addClip: (id: string, clipPath: string) =>
     post<ClipState>(`/api/projects/${id}/clips`, { clip_path: clipPath }),

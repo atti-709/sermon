@@ -178,13 +178,21 @@ const HighlightCard: React.FC<{
             <>
               <div className="row" style={{ marginTop: 12, justifyContent: "space-between" }}>
                 <span className="chip on">vertical · tracked · 1080×1920</span>
-                <button className="sm" onClick={() => api.reveal(h.vertical!.path)}>
-                  Reveal in Finder
-                </button>
+                <span className="row" style={{ gap: 8 }}>
+                  {h.folder && (
+                    <button className="sm" onClick={() => api.reveal(h.folder!)}>
+                      Open this highlight's folder
+                    </button>
+                  )}
+                  <button className="sm" onClick={() => api.reveal(h.vertical!.path)}>
+                    Reveal the clip
+                  </button>
+                </span>
               </div>
               <div className="path" style={{ marginTop: 6 }}>
-                {h.vertical.path}
+                {h.folder ? `${h.folder.split("/").pop()}/01_VERTICAL_NO_CAPTION/${h.vertical.path.split("/").pop()}` : h.vertical.path}
               </div>
+              {h.final?.exists && <div className="chip on" style={{ marginTop: 8 }}>finished video ready</div>}
             </>
           )}
         </div>
@@ -231,7 +239,9 @@ export const Highlights: React.FC<{
         candidates with a hook moment and a virality score. Preview a candidate, then{" "}
         <strong>Export vertical</strong>: the speaker gets tracked and the clip comes out as a
         1080×1920 file that opens with its hook, ready for your DaVinci edit — B-roll lands in the
-        final vertical frame.
+        final vertical frame. Each export gets a folder of its own next to the sermon —{" "}
+        <code>01_Title/01_VERTICAL_NO_CAPTION/</code> — and the finished video lands in that
+        folder's root at the end.
       </p>
       {!keyPresent && (
         <p className="error">

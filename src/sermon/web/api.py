@@ -7,12 +7,13 @@ import subprocess
 import tempfile
 import uuid
 from pathlib import Path
+from typing import NamedTuple
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from .. import __version__
+from .. import __version__, layout
 from ..captions import APP_PUBLIC_DIR
 from . import projects
 from .jobs import JobBusy, manager, worker_argv
@@ -67,6 +68,12 @@ def fs_list(path: str | None = None) -> dict:
 class PickFileRequest(BaseModel):
     # video | clip | folder — fixed prompts only, nothing user-supplied reaches AppleScript
     kind: str = "video"
+    # a folder to open the dialog in (the highlight's 02_DAVINCI_EXPORT, usually)
+    start_path: str | None = None
+
+
+def _applescript_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 @router.post("/fs/pick")
@@ -82,7 +89,12 @@ def pick_file(req: PickFileRequest) -> dict:
         "folder": "Choose where finished videos should be saved",
     }.get(req.kind, "Choose a video")
     chooser = "choose folder" if req.kind == "folder" else "choose file"
-    script = f'POSIX path of ({chooser} with prompt "{prompt}")'
+    location = ""
+    if req.start_path:
+        start = Path(req.start_path).expanduser()
+        if start.is_dir():
+            location = f" default location (POSIX file {_applescript_string(str(start))})"
+    script = f'POSIX path of ({chooser} with prompt "{prompt}"{location})'
     try:
         proc = subprocess.run(
             ["osascript", "-e", "activate", "-e", script],
@@ -146,8 +158,35 @@ def get_transcript(project_id: str) -> dict:
     return json.loads(segments.read_text(encoding="utf-8"))
 
 
-def vertical_clip_path(video: Path, index: int) -> Path:
-    return video.resolve().parent / f"{video.stem}.h{index}.vertical.mov"
+def _highlight_dir(video: Path, index: int, title: str | None = None) -> Path:
+    """The folder for highlight `index`, taking its name from the highlights file
+    when nothing is on disk yet."""
+    existing = layout.highlight_dir(video, index)
+    if existing is not None:
+        return existing
+    if title is None:
+        path = projects.artifact_paths(video)["highlights"]
+        if not path.is_file():
+            raise HTTPException(422, "no highlights yet — run the highlights step first")
+        items = json.loads(path.read_text(encoding="utf-8")).get("highlights", [])
+        if not 1 <= index <= len(items):
+            raise HTTPException(404, f"highlight {index} does not exist")
+        title = items[index - 1]["title"]
+    return layout.highlight_dir(video, index, title)
+
+
+def _highlight_folders(video: Path, index: int, title: str) -> dict:
+    """The folder set the UI shows for one highlight: where its export went, where
+    the DaVinci render is expected, and where the finished video lands."""
+    highlight = _highlight_dir(video, index, title)
+    vertical = layout.vertical_clip(highlight)
+    final = layout.final_render(highlight)
+    return {
+        "folder": str(highlight),
+        "davinci_dir": str(layout.davinci_dir(highlight)),
+        "vertical": {"index": index, "path": str(vertical), "exists": vertical.is_file()},
+        "final": {"path": str(final), "exists": final.is_file()},
+    }
 
 
 @router.get("/projects/{project_id}/highlights")
@@ -158,8 +197,7 @@ def get_highlights(project_id: str) -> dict:
         raise HTTPException(404, "no highlights yet")
     data = json.loads(highlights.read_text(encoding="utf-8"))
     for i, h in enumerate(data.get("highlights", []), 1):
-        out = vertical_clip_path(video, i)
-        h["vertical"] = {"index": i, "path": str(out), "exists": out.is_file()}
+        h.update(_highlight_folders(video, i, h["title"]))
     return data
 
 
@@ -213,12 +251,11 @@ def update_highlight_end(project_id: str, index: int, req: HighlightEndRequest) 
         items,
         data.get("video", video.name),
         video.stem,
-        video.resolve().parent,
+        layout.source_dir(video),
         data.get("gemini_model", ""),
     )
-    # attached after the write — a derived field, not part of the file
-    out = vertical_clip_path(video, index)
-    return {**highlight, "vertical": {"index": index, "path": str(out), "exists": out.is_file()}}
+    # attached after the write — derived fields, not part of the file
+    return {**highlight, **_highlight_folders(video, index, highlight["title"])}
 
 
 class OutputDirRequest(BaseModel):
@@ -235,6 +272,13 @@ def set_output_dir(project_id: str, req: OutputDirRequest) -> dict:
     if not os.access(directory, os.W_OK):
         raise HTTPException(422, f"{directory} is not writable")
     return {"output_dir": str(projects.set_output_dir(video, directory))}
+
+
+@router.delete("/projects/{project_id}/output-dir")
+def clear_output_dir(project_id: str) -> dict:
+    """Back to the default: each finished video in its own highlight folder."""
+    projects.set_output_dir(_project_video(project_id), None)
+    return {"output_dir": None}
 
 
 @router.post("/projects/{project_id}/export")
@@ -285,10 +329,25 @@ def get_clip(project_id: str, clip_id: str) -> dict:
     return projects.clip_state(video, _project_clip(project_id, clip_id))
 
 
+def _write_sidecar(clip: Path, suffix: str, contents: str) -> list[str]:
+    """Write a clip sidecar and the copy the Remotion app reads.
+
+    Keeping both identical is what makes Studio, the web Player and the render
+    agree — they each read whichever copy is closest to them."""
+    local = layout.ensure_parent(layout.sidecar(clip, suffix))
+    local.write_text(contents, encoding="utf-8")
+    written = [str(local)]
+    if APP_PUBLIC_DIR.is_dir():
+        public = APP_PUBLIC_DIR / layout.public_sidecar_name(clip, suffix)
+        public.write_text(contents, encoding="utf-8")
+        written.append(str(public))
+    return written
+
+
 @router.get("/projects/{project_id}/clips/{clip_id}/captions")
 def get_captions(project_id: str, clip_id: str) -> list:
     clip = _project_clip(project_id, clip_id)
-    captions_json = clip.parent / f"{clip.stem}.captions.json"
+    captions_json = layout.sidecar(clip, "captions.json")
     if not captions_json.is_file():
         raise HTTPException(404, "no captions yet — run the captions step first")
     return json.loads(captions_json.read_text(encoding="utf-8"))
@@ -298,20 +357,13 @@ def get_captions(project_id: str, clip_id: str) -> list:
 def put_captions(project_id: str, clip_id: str, captions: list[dict]) -> dict:
     clip = _project_clip(project_id, clip_id)
     contents = json.dumps(captions, indent=2, ensure_ascii=False) + "\n"
-    # source of truth next to the clip, plus the copy the Remotion app reads —
-    # keeping both identical means Studio, Player and render never disagree
-    written = []
-    for target in (clip.parent / f"{clip.stem}.captions.json", APP_PUBLIC_DIR / f"{clip.stem}.captions.json"):
-        if target.parent.is_dir():
-            target.write_text(contents, encoding="utf-8")
-            written.append(str(target))
-    return {"ok": True, "written": written}
+    return {"ok": True, "written": _write_sidecar(clip, "captions.json", contents)}
 
 
 @router.get("/projects/{project_id}/clips/{clip_id}/corrections")
 def get_corrections(project_id: str, clip_id: str) -> dict:
     clip = _project_clip(project_id, clip_id)
-    corr_path = clip.parent / f"{clip.stem}.corrections.json"
+    corr_path = layout.sidecar(clip, "corrections.json")
     if not corr_path.is_file():
         raise HTTPException(404, "no proofread results stored for this clip")
     return json.loads(corr_path.read_text(encoding="utf-8"))
@@ -333,23 +385,16 @@ def put_style(project_id: str, clip_id: str, style: CaptionStyleRequest) -> dict
     clip = _project_clip(project_id, clip_id)
     saved = {"yOffset": style.yOffset}
     contents = json.dumps(saved, indent=2) + "\n"
-    # both copies stay identical, as for captions — Studio, Player and render
-    # must never disagree about where the captions sit
-    written = []
-    for target in (projects.style_path(clip), APP_PUBLIC_DIR / f"{clip.stem}.style.json"):
-        if target.parent.is_dir():
-            target.write_text(contents, encoding="utf-8")
-            written.append(str(target))
-    return {"ok": True, "style": saved, "written": written}
+    return {"ok": True, "style": saved, "written": _write_sidecar(clip, "style.json", contents)}
 
 
 @router.get("/projects/{project_id}/clips/{clip_id}/framing")
 def get_framing(project_id: str, clip_id: str) -> dict:
     clip = _project_clip(project_id, clip_id)
-    for candidate in (clip.parent / f"{clip.stem}.framing.json", APP_PUBLIC_DIR / f"{clip.stem}.framing.json"):
-        if candidate.is_file():
-            return json.loads(candidate.read_text(encoding="utf-8"))
-    raise HTTPException(404, "no framing data — run tracking first")
+    framing = layout.sidecar(clip, "framing.json")
+    if not framing.is_file():
+        raise HTTPException(404, "no framing data — run tracking first")
+    return json.loads(framing.read_text(encoding="utf-8"))
 
 
 # --- jobs --------------------------------------------------------------------
@@ -367,8 +412,16 @@ def _require_gemini_key() -> None:
         raise HTTPException(422, "GEMINI_API_KEY is not set — add it to the .env file at the repo root")
 
 
-def _build_job(req: JobRequest) -> tuple[list[str], Path, dict | None, list[Path]]:
-    """Returns (argv, cwd, preset_result, cleanup_files) for the requested job."""
+class JobSpec(NamedTuple):
+    argv: list[str]
+    cwd: Path
+    preset_result: dict | None = None
+    cleanup_files: list[Path] = []
+    # files this job writes in place — removed again if it is canceled part-way
+    outputs: list[Path] = []
+
+
+def _build_job(req: JobRequest) -> JobSpec:
     p = req.params
     repo_cwd = APP_PUBLIC_DIR.parents[1]
 
@@ -378,7 +431,7 @@ def _build_job(req: JobRequest) -> tuple[list[str], Path, dict | None, list[Path
             "transcribe", "--video", str(video),
             "--model", p.get("model", "large-v3-turbo"), "--language", p.get("language", "sk"),
         )
-        return argv, repo_cwd, None, []
+        return JobSpec(argv, repo_cwd)
 
     if req.kind == "highlights":
         _require_gemini_key()
@@ -393,7 +446,7 @@ def _build_job(req: JobRequest) -> tuple[list[str], Path, dict | None, list[Path
             "--max-duration", str(p.get("max_duration", 100)),
             "--gemini-model", p.get("gemini_model", "gemini-flash-latest"),
         )
-        return argv, repo_cwd, None, []
+        return JobSpec(argv, repo_cwd)
 
     if req.kind == "export_vertical":
         video = _project_video(req.project_id)
@@ -401,7 +454,10 @@ def _build_job(req: JobRequest) -> tuple[list[str], Path, dict | None, list[Path
             start, end, index = float(p["start_sec"]), float(p["end_sec"]), int(p["index"])
         except (KeyError, TypeError, ValueError) as exc:
             raise HTTPException(422, "export_vertical needs start_sec, end_sec and index") from exc
-        out = vertical_clip_path(video, index)
+        # all three stage folders now, not just the one being written: the user has to
+        # be able to save their DaVinci render into 02_DAVINCI_EXPORT
+        highlight = layout.ensure_highlight_dirs(_highlight_dir(video, index, p.get("title")))
+        out = layout.vertical_clip(highlight)
         argv = worker_argv(
             "export-vertical", "--video", str(video),
             "--start", str(start), "--end", str(end), "--out", str(out),
@@ -411,12 +467,12 @@ def _build_job(req: JobRequest) -> tuple[list[str], Path, dict | None, list[Path
         hook_start, hook_end = p.get("hook_start_sec"), p.get("hook_end_sec")
         if hook_start is not None and hook_end is not None:
             argv += ["--hook-start", str(float(hook_start)), "--hook-end", str(float(hook_end))]
-        return argv, repo_cwd, {"paths": {"vertical": str(out)}}, []
+        return JobSpec(argv, repo_cwd, {"paths": {"vertical": str(out)}}, outputs=[out])
 
     if req.kind in ("captions", "track"):
         clip = _project_clip(req.project_id, req.clip_id)
         if req.kind == "track":
-            return worker_argv("track", "--clip", str(clip)), repo_cwd, None, []
+            return JobSpec(worker_argv("track", "--clip", str(clip)), repo_cwd)
         argv = worker_argv(
             "captions", "--clip", str(clip),
             "--model", p.get("model", "large-v3-turbo"), "--language", p.get("language", "sk"),
@@ -424,18 +480,20 @@ def _build_job(req: JobRequest) -> tuple[list[str], Path, dict | None, list[Path
         )
         if not p.get("proofread", True):
             argv.append("--no-proofread")
-        return argv, repo_cwd, None, []
+        return JobSpec(argv, repo_cwd)
 
     if req.kind == "render":
         video = _project_video(req.project_id)
         clip = _project_clip(req.project_id, req.clip_id)
-        if not (APP_PUBLIC_DIR / clip.name).is_file() or not (APP_PUBLIC_DIR / f"{clip.stem}.captions.json").is_file():
+        public_src = layout.public_name(clip)
+        if not (APP_PUBLIC_DIR / public_src).is_file() or not (
+            APP_PUBLIC_DIR / layout.public_sidecar_name(clip, "captions.json")
+        ).is_file():
             raise HTTPException(422, "clip is not in captions/public yet — run the captions step first")
-        out_path = projects.output_dir(video) / f"{clip.stem}.captioned.mp4"
-        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path = layout.ensure_parent(projects.rendered_path(video, clip))
         props_file = Path(tempfile.gettempdir()) / f"sermon-props-{uuid.uuid4().hex[:8]}.json"
         props = {
-            "src": clip.name,
+            "src": public_src,
             "captions": None,
             "framing": None,
             "yOffset": projects.load_style(clip)["yOffset"],
@@ -443,21 +501,24 @@ def _build_job(req: JobRequest) -> tuple[list[str], Path, dict | None, list[Path
         }
         props_file.write_text(json.dumps(props), encoding="utf-8")
         argv = ["npx", "remotion", "render", "CaptionedClip", f"--props={props_file}", str(out_path)]
-        return argv, APP_PUBLIC_DIR.parent, {"paths": {"output": str(out_path)}}, [props_file]
+        return JobSpec(argv, APP_PUBLIC_DIR.parent, {"paths": {"output": str(out_path)}},
+                       cleanup_files=[props_file], outputs=[out_path])
 
     raise HTTPException(422, f"unknown job kind: {req.kind}")
 
 
 @router.post("/jobs")
 async def start_job(req: JobRequest) -> dict:
-    argv, cwd, preset_result, cleanup = _build_job(req)
+    spec = _build_job(req)
     try:
-        job = await manager.start(req.kind, argv, cwd, project_id=req.project_id, clip_id=req.clip_id)
+        job = await manager.start(req.kind, spec.argv, spec.cwd,
+                                  project_id=req.project_id, clip_id=req.clip_id)
     except JobBusy as exc:
         raise HTTPException(409, str(exc)) from exc
-    if preset_result is not None:
-        job.result = preset_result
-    job.cleanup_files.extend(cleanup)
+    if spec.preset_result is not None:
+        job.result = spec.preset_result
+    job.cleanup_files.extend(spec.cleanup_files)
+    job.outputs.extend(spec.outputs)
     return {"job_id": job.id}
 
 

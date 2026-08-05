@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from . import __version__
+from . import __version__, layout
 from .export import export_timeline
 from .highlights import DEFAULT_GEMINI_MODEL, select_highlights, write_highlights
 from .transcribe import DEFAULT_MODEL, MODEL_ALIASES, transcribe_video, write_outputs
@@ -129,7 +129,7 @@ def _cmd_transcribe(args: argparse.Namespace) -> Path:
     video: Path = args.video
     if not video.exists():
         sys.exit(f"error: {video} does not exist")
-    out_dir = args.output_dir or video.resolve().parent
+    out_dir = args.output_dir or layout.source_dir(video)
 
     print(f"Transcribing {video.name} with {args.model} (language: {args.language})…")
     started = time.monotonic()
@@ -175,7 +175,7 @@ def _cmd_highlights(args: argparse.Namespace, segments_path: Path | None = None)
     for name, path in paths.items():
         print(f"  {name}: {path}")
 
-    video_file = segments_path.parent / data.get("video", "")
+    video_file = layout.video_for_source_file(segments_path, data.get("video", ""))
     if video_file.is_file():
         xml_path = export_timeline(paths["json"], video_file)
         print(f"  timeline: {xml_path}  (DaVinci Resolve: File → Import Timeline)")
@@ -187,10 +187,11 @@ def _cmd_export(args: argparse.Namespace) -> None:
     input_path: Path = args.input
     if input_path.name.endswith(".highlights.json"):
         hl_path = input_path.resolve()
-        video = hl_path.parent / json.loads(hl_path.read_text(encoding="utf-8")).get("video", "")
+        video_name = json.loads(hl_path.read_text(encoding="utf-8")).get("video", "")
+        video = layout.video_for_source_file(hl_path, video_name)
     else:
         video = input_path.resolve()
-        hl_path = video.parent / f"{video.stem}.highlights.json"
+        hl_path = layout.source_file(video, "highlights.json")
     if not hl_path.exists():
         sys.exit(f"error: {hl_path} not found — run `sermon highlights` first")
     if not video.is_file():
@@ -204,7 +205,7 @@ def _cmd_run(args: argparse.Namespace) -> None:
     video: Path = args.video
     if not video.exists():
         sys.exit(f"error: {video} does not exist")
-    out_dir = args.output_dir or video.resolve().parent
+    out_dir = args.output_dir or layout.source_dir(video)
     segments_path = out_dir / f"{video.stem}.segments.json"
 
     if segments_path.exists() and not args.force:
@@ -304,7 +305,7 @@ def _resolve_segments_path(input_path: Path) -> Path:
     if input_path.name.endswith(".segments.json"):
         segments_path = input_path
     else:
-        segments_path = input_path.resolve().parent / f"{input_path.stem}.segments.json"
+        segments_path = layout.source_file(input_path, "segments.json")
         if not segments_path.exists():
             sys.exit(f"error: {segments_path} not found — run `sermon transcribe {input_path.name}` first")
     if not segments_path.exists():

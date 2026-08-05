@@ -67,18 +67,43 @@ uv run sermon web   # opens http://127.0.0.1:8756
 The server runs on your Mac, so everything Apple-native still applies: transcription
 on the Metal GPU, face tracking on the Neural Engine, "Reveal in Finder" buttons.
 Long steps run as subprocesses with live logs and progress streamed to the browser;
-project state is derived from the `<stem>.*` files next to your video, so you can
-quit and resume anytime (recent projects are remembered in `~/.sermon/recents.json`).
+project state is derived from the folders next to your video (see **Where files go**
+below), so you can quit and resume anytime — recent projects are remembered in
+`~/.sermon/recents.json`. **Cancel** stops a step for real: each job runs in its own
+process group and cancelling takes down every process it started — the ffmpeg behind
+an export, the node and headless Chrome behind a render — and deletes the half-written
+file it was producing.
 
 The preview step embeds the exact Remotion composition the final render uses
 (`captions/src/CaptionedClipCore.tsx`, shared with Remotion Studio) — click a caption
 word to fix a typo; edits land in the same `.captions.json` Studio and the render read.
 
-Finished renders are written next to the sermon as `<clip>.captioned.mp4`, alongside
-everything else the pipeline produces. The Render step's **Change…** button points a
-project somewhere else (an export drive, a Dropbox folder); the choice is remembered in
-`<stem>.project.json`. Renders made before this was configurable stay visible where they
-were, in `captions/out/`.
+## Where files go
+
+Each highlight you export gets a folder of its own, named after the highlight and
+numbered by its virality rank, with one folder per stage inside it. The sermon's own
+folder keeps just the source video and those highlight folders:
+
+```
+Movies/kazen/
+  kazen.mp4                          the source video, untouched
+  00_SOURCE/                         transcript, segments, highlights, Resolve XML, project sidecar
+  01_Boh ťa vidí/
+      01_VERTICAL_NO_CAPTION/        the tracked 9:16 export, straight out of ffmpeg
+      02_DAVINCI_EXPORT/             you render your DaVinci edit into here
+      03_CAPTIONING/                 caption / framing / style / cuts JSON — metadata only
+      Boh ťa vidí.mp4                the finished, captioned video
+  02_Nikdy nie si sám/
+      …
+```
+
+The finished video is named after its highlight alone — its folder already says which
+sermon and which moment. A clip's stage folder is what locates its metadata, so no step
+has to be told where the previous one put things (`src/sermon/layout.py` owns all of it).
+
+The Render step's **Change…** button points a project at one folder for every render
+instead (an export drive, a Dropbox folder); the choice is remembered in
+`00_SOURCE/<stem>.project.json` and **Use the highlight's folder** clears it again.
 
 For frontend development: `uv run sermon web --no-browser` in one terminal,
 `npm run dev` in `web/` in another (Vite proxies `/api` and `/media`).
@@ -95,7 +120,7 @@ uv run sermon highlights kazen.mp4       # reuses kazen.segments.json
 uv run sermon export kazen.mp4           # re-generate just the Resolve XML
 ```
 
-Outputs land next to the video (override with `-o`):
+Outputs land in the video's `00_SOURCE/` folder (override with `-o`):
 
 | File | Contents |
 | --- | --- |
@@ -159,8 +184,10 @@ ffmpeg-per-frame extraction while rendering. Together they take a 90-second clip
 keep `<OffthreadVideo>`, which scrubs better; the two agree on framing and colour, and differ
 only in which of two adjacent source frames a 50 → 30 fps output frame samples (20 ms).
 
-`sermon captions` writes `<clip>.captions.json` (one entry per word) next to the clip and
-copies both into `captions/public/`. The caption style is hard-coded in
+`sermon captions` writes `<clip>.captions.json` (one entry per word) into the clip's
+`03_CAPTIONING/` folder and copies the clip plus its JSON into `captions/public/`, where
+the names carry a short digest of the clip's folder — that folder is flat, and two
+highlights are routinely called the same thing. The caption style is hard-coded in
 `captions/src/CaptionedClipCore.tsx`: 9:16 vertical, karaoke pages of ~3-5 words where words
 appear progressively as spoken (the full page stays visible once complete). Captions are set
 in Aspekta 600 by Ivo Dolenc, bundled at `captions/public/fonts/Aspekta-600.ttf` under the
@@ -176,7 +203,7 @@ over the highlight's time window and bakes the moving crop into the exported cli
 ffmpeg pass where a `perspective` filter slides the fractional crop quad with per-frame
 expressions (subpixel positions at the full frame rate; an integer `sendcmd` crop was visibly
 steppy), scaled to 1080×1920. The **horizontal route** (after the edit) instead keeps the clip
-in 16:9 and writes `<clip>.framing.json`, smoothed X offsets that the Remotion app applies per
+in 16:9 and writes a `framing.json` sidecar, smoothed X offsets that the Remotion app applies per
 frame, so the crop moves at render time:
 
 ```sh

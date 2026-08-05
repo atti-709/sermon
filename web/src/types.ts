@@ -8,6 +8,12 @@ export type ClipState = {
   path: string;
   name: string;
   exists: boolean;
+  /** the highlight folder this clip belongs to (`01_Boh ťa vidí`), null when outside the layout */
+  highlight: string | null;
+  /** the highlight's folder, or the clip's own when it sits outside the layout */
+  folder: string;
+  /** which stage folder it came out of: 01_VERTICAL_NO_CAPTION | 02_DAVINCI_EXPORT */
+  stage: string | null;
   has_captions: boolean;
   has_framing: boolean;
   has_corrections: boolean;
@@ -37,8 +43,10 @@ export type ProjectState = {
     fps?: number | null;
   };
   artifacts: Record<"transcript" | "srt" | "segments" | "highlights" | "highlights_md" | "resolve_xml", Artifact>;
-  /** where finished renders are written — the sermon's own folder by default */
-  output_dir: string;
+  /** 00_SOURCE: everything derived from the sermon as a whole */
+  source_dir: string;
+  /** an explicit folder for finished renders; null = each one in its own highlight folder */
+  output_dir: string | null;
   clips: ClipState[];
   steps: Record<"transcribe" | "highlights" | "export" | "clips" | "captions" | "render", StepStatus>;
 };
@@ -72,6 +80,12 @@ export type Highlight = {
   excerpt: string;
   /** server-augmented: the vertical tracked export for this highlight */
   vertical?: { index: number; path: string; exists: boolean };
+  /** server-augmented: this highlight's own folder, `<dir>/01_<title>` */
+  folder?: string;
+  /** server-augmented: where the DaVinci render is expected */
+  davinci_dir?: string;
+  /** server-augmented: the finished captioned video */
+  final?: { path: string; exists: boolean };
 };
 export type HighlightsFile = { video: string; gemini_model: string; highlights: Highlight[] };
 
@@ -112,6 +126,8 @@ export type JobSnapshot = {
   project_id: string | null;
   clip_id: string | null;
   state: "running" | "succeeded" | "failed" | "canceled";
+  /** cancel was requested and the job's processes are still being taken down */
+  canceling?: boolean;
   progress: JobProgress;
   result: Record<string, unknown> | null;
   error: string | null;

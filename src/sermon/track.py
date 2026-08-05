@@ -1,8 +1,9 @@
 """Speaker tracking for the 9:16 reframe: Apple Vision face detection + a virtual-camera path.
 
 The Remotion app crops the 16:9 clip to 9:16 (`objectFit: cover`), which by default shows the
-center. This module finds where the speaker actually is and writes `<clip>.framing.json` with
-per-time X positions for the crop window, styled after a human camera operator: the camera
+center. This module finds where the speaker actually is and writes a `framing.json` sidecar
+(in the clip's `03_CAPTIONING/` folder) with per-time X positions for the crop window,
+styled after a human camera operator: the camera
 HOLDS still while the subject stays inside a dead zone and only PANS (minimum-jerk, with
 look-ahead) once they have clearly moved — less motion beats more motion.
 
@@ -19,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import layout
 from .captions import APP_PUBLIC_DIR
 
 # ---------------------------------------------------------------------------
@@ -388,7 +390,7 @@ def _thin_keyframes(t_grid: np.ndarray, camera: np.ndarray, cuts: list[float]) -
 
 
 def framing_file_for(video: Path) -> Path:
-    return video.resolve().parent / f"{video.stem}.framing.json"
+    return layout.sidecar(video, "framing.json")
 
 
 def compute_camera_path(video: Path, meta: dict, sample_hz: float = SAMPLE_HZ,
@@ -442,12 +444,12 @@ def track_video(video: Path, sample_hz: float = SAMPLE_HZ, copy_to_app: bool = T
         "keyframes": keyframes,
     }
 
-    json_path = framing_file_for(video)
+    json_path = layout.ensure_parent(framing_file_for(video))
     json_path.write_text(json.dumps(framing, indent=2) + "\n", encoding="utf-8")
     paths = {"framing": json_path}
 
     if copy_to_app and APP_PUBLIC_DIR.is_dir():
-        app_path = APP_PUBLIC_DIR / json_path.name
+        app_path = APP_PUBLIC_DIR / layout.public_sidecar_name(video, "framing.json")
         if app_path.resolve() != json_path.resolve():
             shutil.copy2(json_path, app_path)
         paths["app"] = app_path
@@ -472,7 +474,8 @@ def _write_debug_overlay(video: Path, samples: list[Sample], t_grid: np.ndarray,
     cmd_file = video.resolve().parent / f"{video.stem}.framing-debug.cmd"
     cmd_file.write_text("\n".join(sorted(cmd_lines, key=lambda l: float(l.split()[0]))) + "\n")
 
-    out = video.resolve().parent / f"{video.stem}.framing-debug.mp4"
+    # a diagnostic, not a deliverable — it belongs with the tracking metadata
+    out = layout.ensure_parent(layout.sidecar(video, "framing-debug.mp4"))
     subprocess.run(
         ["ffmpeg", "-v", "error", "-y", "-i", str(video.resolve()),
          "-vf",

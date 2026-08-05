@@ -31,6 +31,7 @@ from typing import Callable
 
 import numpy as np
 
+from . import layout
 from .track import OUT_ASPECT, compute_camera_path, probe_video
 
 MIN_SEGMENT_SEC = 0.5
@@ -104,7 +105,7 @@ def export_vertical_clip(
     `hook` is an optional (start, end) window of the same video to play first —
     usually a moment from inside the passage, which then repeats in context."""
     video = video.resolve()
-    out_path = out_path.resolve()
+    out_path = layout.ensure_parent(out_path.resolve())  # the filtergraph script lands here too
     meta = probe_video(video)
 
     segments = []
@@ -192,7 +193,7 @@ def export_vertical_clip(
 
 
 def cuts_file_for(clip: Path) -> Path:
-    return clip.resolve().parent / f"{clip.stem}.cuts.json"
+    return layout.sidecar(clip, "cuts.json")
 
 
 def write_cut_sidecar(out_path: Path, durations: list[float]) -> None:
@@ -206,4 +207,4 @@ def write_cut_sidecar(out_path: Path, durations: list[float]) -> None:
     if not seams:
         path.unlink(missing_ok=True)
         return
-    path.write_text(json.dumps({"cuts": seams}, indent=2) + "\n", encoding="utf-8")
+    layout.ensure_parent(path).write_text(json.dumps({"cuts": seams}, indent=2) + "\n", encoding="utf-8")

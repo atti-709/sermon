@@ -11,12 +11,27 @@ export const Render: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const stale = clip.rendered.exists && clip.rendered.stale;
 
+  // the render goes into the clip's own highlight folder unless the project points
+  // somewhere else, so the destination is read off the render path itself
+  const destination = clip.rendered.path.replace(/\/[^/]+$/, "");
+  const fileName = clip.rendered.path.split("/").pop();
+
   const chooseOutputDir = async () => {
     setError(null);
-    const { path } = await api.pickFile("folder");
+    const { path } = await api.pickFile("folder", destination);
     if (!path) return; // dialog canceled
     try {
       await api.setOutputDir(project.id, path);
+      await onRefresh();
+    } catch (exc) {
+      setError((exc as Error).message);
+    }
+  };
+
+  const useHighlightFolder = async () => {
+    setError(null);
+    try {
+      await api.clearOutputDir(project.id);
       await onRefresh();
     } catch (exc) {
       setError((exc as Error).message);
@@ -36,18 +51,34 @@ export const Render: React.FC<{
       </p>
       <div className="row" style={{ gap: 10, marginTop: 20 }}>
         <span className="hint" style={{ flexShrink: 0 }}>
-          Saving to
+          Saving as
         </span>
         <strong className="mono" style={{ overflowWrap: "anywhere", minWidth: 0 }}>
-          {project.output_dir}
+          {fileName}
+        </strong>
+        <span className="hint" style={{ flexShrink: 0 }}>
+          in
+        </span>
+        <strong className="mono" style={{ overflowWrap: "anywhere", minWidth: 0 }}>
+          {clip.highlight && !project.output_dir ? clip.highlight : destination}
         </strong>
         <button className="sm" onClick={() => void chooseOutputDir()}>
           Change…
         </button>
-        <button className="sm" onClick={() => api.reveal(project.output_dir)}>
+        <button className="sm" onClick={() => api.reveal(destination)}>
           Open
         </button>
+        {project.output_dir && (
+          <button className="sm" onClick={() => void useHighlightFolder()}>
+            Use the highlight's folder
+          </button>
+        )}
       </div>
+      {!project.output_dir && clip.highlight && (
+        <p className="hint" style={{ margin: "6px 0 0" }}>
+          Straight into the highlight's own folder, beside the stages it came out of.
+        </p>
+      )}
       {error && <p className="error">{error}</p>}
       {stale && (
         <div className="card stale-banner" style={{ marginTop: 16 }}>

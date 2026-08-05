@@ -1,20 +1,20 @@
-"""Project state derived from the pipeline's on-disk filename conventions.
+"""Project state derived from the pipeline's on-disk layout (see ../layout.py).
 
-A "project" is a source sermon video; every artifact lives next to it as
-`<stem>.segments.json`, `<stem>.highlights.json`, … The only fact that cannot
-be derived from disk is which rendered clips belong to which sermon — that
-link lives in a `<stem>.project.json` sidecar. Recently opened projects are
-remembered in ~/.sermon/recents.json.
+A "project" is a source sermon video; whole-sermon artifacts live in its
+`00_SOURCE/` folder and each highlight owns a numbered folder of its own. The one
+fact no folder can carry is which rendered clips the user registered for this
+sermon — that link lives in `00_SOURCE/<stem>.project.json`. Recently opened
+projects are remembered in ~/.sermon/recents.json.
 """
 
 import hashlib
 import json
 from pathlib import Path
 
+from .. import layout
 from ..captions import APP_PUBLIC_DIR, load_cuts
 
 RECENTS_FILE = Path.home() / ".sermon" / "recents.json"
-RENDER_OUT_DIR = APP_PUBLIC_DIR.parent / "out"  # legacy: renders used to land inside the repo
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".mkv", ".avi", ".mts", ".m2ts", ".webm"}
 
@@ -24,7 +24,7 @@ def path_id(path: Path) -> str:
 
 
 def sidecar_path(video: Path) -> Path:
-    return video.resolve().parent / f"{video.stem}.project.json"
+    return layout.source_file(video, "project.json")
 
 
 def _load_sidecar(video: Path) -> dict:
@@ -34,12 +34,18 @@ def _load_sidecar(video: Path) -> dict:
     return {"clips": []}
 
 
+def _save_sidecar(video: Path, data: dict) -> None:
+    layout.ensure_parent(sidecar_path(video)).write_text(
+        json.dumps(data, indent=2) + "\n", encoding="utf-8"
+    )
+
+
 def register_clip(video: Path, clip: Path) -> None:
     data = _load_sidecar(video)
     clip_str = str(clip.resolve())
     if clip_str not in data["clips"]:
         data["clips"].append(clip_str)
-    sidecar_path(video).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    _save_sidecar(video, data)
 
 
 def load_recents() -> list[str]:
@@ -93,80 +99,83 @@ def _artifact(path: Path) -> dict:
 def style_path(clip: Path) -> Path:
     """Per-clip caption style sidecar. Keys are camelCase because the Remotion
     composition reads this same file straight from captions/public/."""
-    return clip.resolve().parent / f"{clip.stem}.style.json"
+    return layout.sidecar(clip, "style.json")
 
 
 DEFAULT_CAPTION_STYLE = {"yOffset": 0}
 
 
 def load_style(clip: Path) -> dict:
-    for candidate in (style_path(clip), APP_PUBLIC_DIR / f"{clip.stem}.style.json"):
-        if candidate.is_file():
-            try:
-                data = json.loads(candidate.read_text(encoding="utf-8"))
-                return {"yOffset": int(data.get("yOffset", 0))}
-            except (json.JSONDecodeError, TypeError, ValueError):
-                break  # unreadable sidecar — fall back to the default position
+    path = style_path(clip)
+    if path.is_file():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return {"yOffset": int(data.get("yOffset", 0))}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass  # unreadable sidecar — fall back to the default position
     return dict(DEFAULT_CAPTION_STYLE)
 
 
 def artifact_paths(video: Path) -> dict[str, Path]:
-    video = video.resolve()
-    stem = video.stem
-    d = video.parent
     return {
-        "transcript": d / f"{stem}.transcript.txt",
-        "srt": d / f"{stem}.srt",
-        "segments": d / f"{stem}.segments.json",
-        "highlights": d / f"{stem}.highlights.json",
-        "highlights_md": d / f"{stem}.highlights.md",
-        "resolve_xml": d / f"{stem}.resolve.xml",
+        "transcript": layout.source_file(video, "transcript.txt"),
+        "srt": layout.source_file(video, "srt"),
+        "segments": layout.source_file(video, "segments.json"),
+        "highlights": layout.source_file(video, "highlights.json"),
+        "highlights_md": layout.source_file(video, "highlights.md"),
+        "resolve_xml": layout.source_file(video, "resolve.xml"),
     }
 
 
-def output_dir(video: Path) -> Path:
-    """Where this project's finished renders go.
+def output_dir(video: Path) -> Path | None:
+    """An explicit folder this project's renders are written to, if one was chosen.
 
-    The sermon's own folder by default — everything else the pipeline produces
-    already lives beside the video, and renders used to land inside the repo
-    where nobody looks. A project may point somewhere else (see set_output_dir)."""
+    None means the default: each finished video lands in its own highlight folder,
+    next to the stages it came out of."""
     configured = _load_sidecar(video).get("output_dir")
     if configured:
         path = Path(configured).expanduser()
         if path.is_dir():
             return path
-    return video.resolve().parent
+    return None
 
 
-def set_output_dir(video: Path, directory: Path) -> Path:
-    directory = directory.expanduser().resolve()
+def set_output_dir(video: Path, directory: Path | None) -> Path | None:
+    """Point renders at `directory`, or back at the highlight folders with None."""
     data = _load_sidecar(video)
-    data["output_dir"] = str(directory)
-    sidecar_path(video).write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    if directory is None:
+        data.pop("output_dir", None)
+    else:
+        directory = directory.expanduser().resolve()
+        data["output_dir"] = str(directory)
+    _save_sidecar(video, data)
     return directory
 
 
 def rendered_path(video: Path, clip: Path) -> Path:
     """Where this clip's finished render is, or will be written.
 
-    New renders always go to the project's output folder, but an existing one is
-    still shown where it actually sits: renders predating this setting live in
-    captions/out, and pointing a project at a new folder must not make yesterday's
-    render look like it was never made."""
-    name = f"{clip.stem}.captioned.mp4"
-    target = output_dir(video) / name
-    previous = (video.resolve().parent / name, RENDER_OUT_DIR / name)
-    if target.is_file():
-        return target
-    return next((p for p in previous if p.is_file()), target)
+    Its highlight's own folder, named after the highlight — the folder already says
+    which sermon and which moment, so the file needs no other qualifier. A project
+    pointed at an explicit output folder writes there instead."""
+    highlight = layout.highlight_dir_for_clip(clip)
+    configured = output_dir(video)
+    if configured is not None:
+        name = f"{layout.highlight_title(highlight)}.mp4" if highlight else f"{clip.stem}.captioned.mp4"
+        return configured / name
+    if highlight is not None:
+        return layout.final_render(highlight)
+    # a clip registered from outside the layout keeps its render beside itself
+    return clip.resolve().parent / f"{clip.stem}.captioned.mp4"
 
 
 def clip_state(video: Path, clip: Path, probe: bool = True) -> dict:
     clip = clip.resolve()
     project_id = path_id(video)
-    captions_json = clip.parent / f"{clip.stem}.captions.json"
-    framing_json = clip.parent / f"{clip.stem}.framing.json"
-    public_video = APP_PUBLIC_DIR / clip.name
+    highlight = layout.highlight_dir_for_clip(clip)
+    captions_json = layout.sidecar(clip, "captions.json")
+    framing_json = layout.sidecar(clip, "framing.json")
+    public_video = APP_PUBLIC_DIR / layout.public_name(clip)
     rendered = rendered_path(video, clip)
     in_public = public_video.is_file()
 
@@ -174,12 +183,10 @@ def clip_state(video: Path, clip: Path, probe: bool = True) -> dict:
     # style — either copy) changed after it was produced; caption edits must visibly
     # propagate to the render step instead of silently showing an old file
     rendered_mtime = rendered.stat().st_mtime if rendered.is_file() else None
-    sources = [clip, public_video, captions_json, framing_json, style_path(clip),
-               clip.parent / f"{clip.stem}.cuts.json",
-               APP_PUBLIC_DIR / f"{clip.stem}.captions.json",
-               APP_PUBLIC_DIR / f"{clip.stem}.framing.json",
-               APP_PUBLIC_DIR / f"{clip.stem}.style.json",
-               APP_PUBLIC_DIR / f"{clip.stem}.cuts.json"]
+    sidecars = ("captions.json", "framing.json", "style.json", "cuts.json")
+    sources = [clip, public_video]
+    sources += [layout.sidecar(clip, suffix) for suffix in sidecars]
+    sources += [APP_PUBLIC_DIR / layout.public_sidecar_name(clip, suffix) for suffix in sidecars]
     source_mtime = max((p.stat().st_mtime for p in sources if p.is_file()), default=None)
     stale = bool(rendered_mtime and source_mtime and source_mtime > rendered_mtime + 1)
 
@@ -188,9 +195,13 @@ def clip_state(video: Path, clip: Path, probe: bool = True) -> dict:
         "path": str(clip),
         "name": clip.name,
         "exists": clip.is_file(),
+        # which highlight this clip belongs to, and the stage folder it came out of
+        "highlight": highlight.name if highlight is not None else None,
+        "folder": str(highlight if highlight is not None else clip.parent),
+        "stage": clip.parent.name if clip.parent.name in layout.CLIP_DIRS else None,
         "has_captions": captions_json.is_file(),
-        "has_framing": framing_json.is_file() or (APP_PUBLIC_DIR / f"{clip.stem}.framing.json").is_file(),
-        "has_corrections": (clip.parent / f"{clip.stem}.corrections.json").is_file(),
+        "has_framing": framing_json.is_file(),
+        "has_corrections": layout.sidecar(clip, "corrections.json").is_file(),
         "in_public": in_public,
         "style": load_style(clip),
         "cuts": load_cuts(clip),
@@ -201,7 +212,7 @@ def clip_state(video: Path, clip: Path, probe: bool = True) -> dict:
             "stale": stale,
         },
         "urls": {
-            "video": f"/media/app/{clip.name}" if in_public else None,
+            "video": f"/media/app/{layout.public_name(clip)}" if in_public else None,
             # resolved server-side from the ids: the render may sit anywhere the
             # project points, so there is no static mount to serve it from
             "rendered": f"/media/render/{project_id}/{path_id(clip)}" if rendered.is_file() else None,
@@ -232,7 +243,9 @@ def derive_state(video: Path, probe: bool = True) -> dict:
             **(_probe_safe(video) if (probe and video.is_file()) else {}),
         },
         "artifacts": {name: _artifact(path) for name, path in arts.items()},
-        "output_dir": str(output_dir(video)),
+        "source_dir": str(layout.source_dir(video)),
+        # None = every finished video lands in its own highlight folder
+        "output_dir": str(configured) if (configured := output_dir(video)) else None,
         "clips": clips,
         "steps": steps,
     }

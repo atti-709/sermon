@@ -7,6 +7,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from . import layout
+
 # Remotion captions app inside this repo; `sermon captions` copies the video + JSON here
 APP_PUBLIC_DIR = Path(__file__).resolve().parents[2] / "captions" / "public"
 
@@ -29,7 +31,7 @@ SAMPLE_RATE = 16000  # whisperx.load_audio always resamples to this
 
 def load_cuts(video: Path) -> list[float]:
     """Splice points inside a clip, in seconds (written by the vertical export)."""
-    path = video.resolve().parent / f"{video.stem}.cuts.json"
+    path = layout.sidecar(video, "cuts.json")
     if not path.is_file():
         return []
     try:
@@ -250,21 +252,19 @@ def _copy_web_safe(video: Path, app_path: Path) -> None:
 
 
 def write_captions(captions: list[dict], video: Path, copy_to_app: bool = True) -> dict[str, Path]:
-    json_path = video.resolve().parent / f"{video.stem}.captions.json"
+    json_path = layout.ensure_parent(layout.sidecar(video, "captions.json"))
     json_path.write_text(json.dumps(captions, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     paths = {"captions": json_path}
 
     if copy_to_app and APP_PUBLIC_DIR.is_dir():
-        _copy_web_safe(video, APP_PUBLIC_DIR / video.name)
-        shutil.copy2(json_path, APP_PUBLIC_DIR / json_path.name)
-        # caption position, if this clip already has one — the composition reads it
-        # from public/ too, and a re-run must not silently reset the clip's style
-        style_json = json_path.parent / f"{video.stem}.style.json"
-        if style_json.is_file():
-            shutil.copy2(style_json, APP_PUBLIC_DIR / style_json.name)
-        # splice points, so the composition keeps caption pages off the cut
-        cuts_json = json_path.parent / f"{video.stem}.cuts.json"
-        if cuts_json.is_file():
-            shutil.copy2(cuts_json, APP_PUBLIC_DIR / cuts_json.name)
-        paths["app"] = APP_PUBLIC_DIR / video.name
+        _copy_web_safe(video, APP_PUBLIC_DIR / layout.public_name(video))
+        shutil.copy2(json_path, APP_PUBLIC_DIR / layout.public_sidecar_name(video, "captions.json"))
+        # the sidecars this clip already has: its caption position, the tracked crop
+        # path, the splice points that keep caption pages off a cut. The composition
+        # reads them from public/ too, and a re-run must not silently reset them.
+        for suffix in ("style.json", "framing.json", "cuts.json"):
+            existing = layout.sidecar(video, suffix)
+            if existing.is_file():
+                shutil.copy2(existing, APP_PUBLIC_DIR / layout.public_sidecar_name(video, suffix))
+        paths["app"] = APP_PUBLIC_DIR / layout.public_name(video)
     return paths
