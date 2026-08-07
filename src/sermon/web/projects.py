@@ -102,9 +102,15 @@ def _playable_state(video: Path, probe: bool) -> dict:
     Skipped along with the ffprobe when the caller only wants a cheap listing —
     the recents screen shows no video."""
     if not probe or not video.is_file():
-        return {"needs_conversion": False, "playable": True}
+        return {"needs_conversion": False, "playable": True, "playable_name": video.name}
     target = playable_source(video)
-    return {"needs_conversion": target != video, "playable": target.is_file()}
+    # the name the preview URL ends in — the twin's, so the URL carries an
+    # extension the browser recognizes rather than the .mkv it cannot play
+    return {
+        "needs_conversion": target != video,
+        "playable": target.is_file(),
+        "playable_name": target.name,
+    }
 
 
 def _artifact(path: Path) -> dict:

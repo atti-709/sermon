@@ -42,6 +42,8 @@ export type ProjectState = {
     needs_conversion?: boolean;
     /** a playable copy is on disk — the source itself, or its remuxed 00_SOURCE twin */
     playable?: boolean;
+    /** filename the preview URL ends in, so it carries an extension the browser knows */
+    playable_name?: string;
     duration_sec?: number | null;
     width?: number | null;
     height?: number | null;

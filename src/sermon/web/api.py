@@ -623,16 +623,20 @@ def render_media(project_id: str, clip_id: str):
     return FileResponse(target)
 
 
-@media_router.get("/source/{project_id}")
-def source_media(project_id: str):
+@media_router.get("/source/{project_id}/{filename}")
+def source_media(project_id: str, filename: str):
     """The sermon, in whatever form the browser can actually play it.
 
-    Resolved server-side rather than by name: a `.mkv` is served through its
-    remuxed twin in `00_SOURCE/`, which is not a file the client knows about."""
+    Which file that is gets resolved server-side, not from `filename`: a `.mkv` is
+    served through its remuxed twin in `00_SOURCE/`, a path the client never sees.
+    The name is still in the URL because a media URL has to end in a real
+    extension — `<video>`, the Remotion player, the network panel and "save as"
+    all read the type off the path, and only some of them fall back to the
+    Content-Type header."""
     from fastapi.responses import FileResponse
 
     video = _project_video(project_id)
     target = projects.playable_source(video)
     if not target.is_file():
         raise HTTPException(404, "no browser-playable copy of this video yet")
-    return FileResponse(target)
+    return FileResponse(target, filename=target.name, content_disposition_type="inline")

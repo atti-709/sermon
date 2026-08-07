@@ -219,7 +219,14 @@ export const Highlights: React.FC<{
   // remuxed twin in 00_SOURCE, which the server resolves from the project id
   const needsConversion = project.video.needs_conversion === true;
   const playable = project.video.playable !== false;
-  const videoUrl = project.video.exists && playable ? `/media/source/${project.id}` : null;
+  // the URL ends in the playable file's own name: players and <video> read the
+  // media type off the path, so an extensionless URL is asking for trouble even
+  // when the Content-Type is right
+  const playableName = project.video.playable_name ?? project.video.name;
+  const videoUrl =
+    project.video.exists && playable
+      ? `/media/source/${project.id}/${encodeURIComponent(playableName)}`
+      : null;
 
   const loadHighlights = () =>
     api
