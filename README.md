@@ -106,6 +106,29 @@ The Render step's **Change…** button points a project at one folder for every 
 instead (an export drive, a Dropbox folder); the choice is remembered in
 `00_SOURCE/<stem>.project.json` and **Use the highlight's folder** clears it again.
 
+### MKV recordings (and other containers)
+
+OBS records to `.mkv` by default, and Matroska is the one container nothing at the
+far end of this pipeline opens: neither Chrome — which draws every preview and does
+the decoding for the final render — nor DaVinci Resolve, which links the file the
+Resolve XML names. ffmpeg has no such problem, so transcription, speaker tracking
+and the vertical export read a `.mkv` directly and nothing about them changes.
+
+For the two that can't, the Highlights step offers **Make a playable copy**, which
+writes `00_SOURCE/<stem>.mp4` — the browser preview and the Resolve timeline then
+use that. It is a **remux, not a transcode**: an OBS recording is already h264/aac,
+so the streams are copied into the new container untouched. That runs at disk speed
+(a 45-minute sermon in a few seconds), the copy is the same size as the source, and
+no frame is re-encoded, so the timeline still cuts on exactly the frames you
+previewed. Your recording is never modified or moved.
+
+A real re-encode happens only when the video codec itself is undecodable — a ProRes
+or DNxHD master, an FFV1 recording — because then there is nothing to copy; it goes
+to hardware h264 at 30 Mbps. PCM audio is converted to AAC on the way in (seconds,
+and the video copy stays untouched) since an MP4 cannot carry it. The same rule
+applies to rendered clips on their way into `captions/public/`, so a clip handed to
+the captions step in any container gets a copy Chrome can actually decode.
+
 For frontend development: `uv run sermon web --no-browser` in one terminal,
 `npm run dev` in `web/` in another (Vite proxies `/api` and `/media`).
 

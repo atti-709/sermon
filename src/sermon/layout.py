@@ -28,6 +28,8 @@ import hashlib
 import re
 from pathlib import Path
 
+from .playable import playable_name
+
 SOURCE_DIR = "00_SOURCE"
 VERTICAL_DIR = "01_VERTICAL_NO_CAPTION"
 DAVINCI_DIR = "02_DAVINCI_EXPORT"
@@ -79,6 +81,16 @@ def video_for_source_file(artifact: Path, video_name: str) -> Path:
     """The source video an artifact in `00_SOURCE/` belongs to."""
     folder = artifact.resolve().parent
     return (folder.parent if folder.name == SOURCE_DIR else folder) / video_name
+
+
+def playable_source(video: Path) -> Path:
+    """Where the browser/Resolve-readable copy of a sermon goes, when one is needed.
+
+    A `.mkv` recording is fine for everything ffmpeg touches and unopenable for
+    everything Chrome or Resolve touches (see ../playable.py). The remuxed twin is
+    derived from the sermon as a whole, so it belongs in `00_SOURCE/` with the rest
+    of what the pipeline derives — the sermon's own folder keeps showing one video."""
+    return source_file(video, "mp4")
 
 
 def speakers_file(sermon_dir: Path) -> Path:
@@ -207,9 +219,14 @@ def public_name(clip: Path) -> str:
     Remotion resolves media through `staticFile()`, so that folder is flat while
     the clips it holds are not: same-named clips from two highlights (or from the
     two stages of one highlight) would overwrite each other and then read each
-    other's captions. The digest of the clip's folder keeps them apart."""
+    other's captions. The digest of the clip's folder keeps them apart.
+
+    The extension is the copy's, not the clip's — a clip that has to be converted
+    on the way in arrives as an `.mp4`, and ffmpeg picks its muxer off the name it
+    is writing to. Keeping `.mkv` here would wrap a browser-playable stream back
+    up in the one container the browser refuses."""
     digest = hashlib.sha1(str(clip.resolve().parent).encode("utf-8")).hexdigest()[:8]
-    return f"{digest}_{clip.name}"
+    return f"{digest}_{playable_name(clip.name)}"
 
 
 def public_sidecar_name(clip: Path, suffix: str) -> str:

@@ -38,6 +38,10 @@ export type ProjectState = {
     path: string;
     name: string;
     exists: boolean;
+    /** the container needs re-wrapping before a browser or Resolve can open it (.mkv, .avi, …) */
+    needs_conversion?: boolean;
+    /** a playable copy is on disk — the source itself, or its remuxed 00_SOURCE twin */
+    playable?: boolean;
     duration_sec?: number | null;
     width?: number | null;
     height?: number | null;
@@ -118,7 +122,14 @@ export type JobDone = {
   result: Record<string, unknown> | null;
   error: string | null;
 };
-export type JobKind = "transcribe" | "highlights" | "export_vertical" | "captions" | "track" | "render";
+export type JobKind =
+  | "convert"
+  | "transcribe"
+  | "highlights"
+  | "export_vertical"
+  | "captions"
+  | "track"
+  | "render";
 
 export type Correction = { index: number; before: string; after: string; reason: string };
 export type CorrectionsFile = { gemini_model: string; corrections: Correction[] };

@@ -180,8 +180,14 @@ def write_resolve_xml(highlights: list[dict], video: Path, out_path: Path) -> Pa
 
 
 def export_timeline(highlights_json: Path, video: Path) -> Path:
+    from . import layout, playable
+
     data = json.loads(highlights_json.read_text(encoding="utf-8"))
     if not data.get("highlights"):
         raise SystemExit(f"error: {highlights_json} contains no highlights")
     stem = highlights_json.name.removesuffix(".highlights.json")
-    return write_resolve_xml(data["highlights"], video, highlights_json.parent / f"{stem}.resolve.xml")
+    # Resolve links the file this XML names, and its importer has never read
+    # Matroska — so a `.mkv` sermon is linked through its remuxed twin instead.
+    # The twin is a stream copy, so every frame the timeline cuts on is the same one.
+    media = playable.ensure(video, layout.playable_source(video))
+    return write_resolve_xml(data["highlights"], media, highlights_json.parent / f"{stem}.resolve.xml")

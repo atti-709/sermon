@@ -65,16 +65,21 @@ class Sample:
 def probe_video(video: Path) -> dict:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-         "stream=width,height,r_frame_rate,duration", "-of", "json", str(video)],
+         "stream=width,height,r_frame_rate,duration:format=duration", "-of", "json", str(video)],
         check=True, capture_output=True, text=True,
     ).stdout
-    stream = json.loads(out)["streams"][0]
+    info = json.loads(out)
+    stream = info["streams"][0]
     num, den = stream["r_frame_rate"].split("/")
+    # Matroska keeps no per-stream duration — only MP4/MOV-family containers store
+    # one per track. The container's own duration is the fallback, and for a
+    # single-video-stream sermon the two are the same number anyway.
+    duration = stream.get("duration") or info.get("format", {}).get("duration")
     return {
         "width": int(stream["width"]),
         "height": int(stream["height"]),
         "fps": float(num) / float(den),
-        "duration": float(stream["duration"]),
+        "duration": float(duration),
     }
 
 

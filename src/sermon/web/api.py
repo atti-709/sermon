@@ -289,6 +289,12 @@ def export_resolve_xml(project_id: str) -> dict:
     highlights = projects.artifact_paths(video)["highlights"]
     if not highlights.is_file():
         raise HTTPException(422, "no highlights yet — run the highlights step first")
+    # Resolve links whatever this XML names, and it cannot open a .mkv — export_timeline
+    # picks the remuxed twin up on its own. It would also *build* one, and that would
+    # block this request for as long as the copy takes, so an unconverted sermon is sent
+    # back to the button that does it with a progress bar instead.
+    if not projects.playable_source(video).is_file():
+        raise HTTPException(422, f"{video.name} needs a Resolve-readable copy first — convert it on the Highlights step")
     try:
         xml_path = export_timeline(highlights, video)
     except BaseException as exc:  # export_timeline raises SystemExit on empty highlights
@@ -426,6 +432,14 @@ class JobSpec(NamedTuple):
 def _build_job(req: JobRequest) -> JobSpec:
     p = req.params
     repo_cwd = APP_PUBLIC_DIR.parents[1]
+
+    if req.kind == "convert":
+        video = _project_video(req.project_id)
+        out = projects.playable_source(video)
+        if out == video:
+            raise HTTPException(422, f"{video.name} is already playable — nothing to convert")
+        argv = worker_argv("convert", "--video", str(video), "--out", str(out))
+        return JobSpec(argv, repo_cwd, {"paths": {"playable": str(out)}}, outputs=[out])
 
     if req.kind == "transcribe":
         video = _project_video(req.project_id)
@@ -609,14 +623,16 @@ def render_media(project_id: str, clip_id: str):
     return FileResponse(target)
 
 
-@media_router.get("/project/{project_id}/{filename}")
-def project_media(project_id: str, filename: str):
+@media_router.get("/source/{project_id}")
+def source_media(project_id: str):
+    """The sermon, in whatever form the browser can actually play it.
+
+    Resolved server-side rather than by name: a `.mkv` is served through its
+    remuxed twin in `00_SOURCE/`, which is not a file the client knows about."""
     from fastapi.responses import FileResponse
 
     video = _project_video(project_id)
-    target = (video.parent / filename).resolve()
-    if target.parent != video.parent.resolve() or target.suffix.lower() not in projects.VIDEO_EXTENSIONS:
-        raise HTTPException(403, "not a project media file")
+    target = projects.playable_source(video)
     if not target.is_file():
-        raise HTTPException(404, f"{filename} not found")
+        raise HTTPException(404, "no browser-playable copy of this video yet")
     return FileResponse(target)

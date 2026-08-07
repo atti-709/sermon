@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from . import layout
+from . import layout, playable
 
 # Remotion captions app inside this repo; `sermon captions` copies the video + JSON here
 APP_PUBLIC_DIR = Path(__file__).resolve().parents[2] / "captions" / "public"
@@ -216,39 +216,18 @@ def proofread_captions(captions: list[dict], gemini_model: str) -> list[tuple[in
     return applied
 
 
-# codecs Chrome can decode — anything else (ProRes DaVinci masters, DNxHD…) must
-# be transcoded on the way into captions/public/, or the web preview and the
-# WebCodecs-based render both get a video they cannot read
-WEB_SAFE_CODECS = frozenset({"h264", "hevc", "vp9", "av1"})
-
-
-def _video_codec(video: Path) -> str:
-    import subprocess
-
-    return subprocess.run(
-        ["ffprobe", "-v", "error", "-select_streams", "v:0",
-         "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(video)],
-        capture_output=True, text=True, check=False,
-    ).stdout.strip()
-
-
 def _copy_web_safe(video: Path, app_path: Path) -> None:
-    """Copy the clip into captions/public, transcoding to high-bitrate h264 when
-    the source codec is not browser-decodable. 30 Mbps hardware h264 is visually
-    transparent as a render source (the final export is ~8 Mbps anyway)."""
-    import subprocess
+    """Copy the clip into captions/public, converting when the browser cannot read it.
 
-    codec = _video_codec(video)
-    if codec in WEB_SAFE_CODECS:
+    Both halves of "cannot read it" matter (see ../playable.py): a ProRes master
+    has to be re-encoded, while a `.mkv` only has to be re-wrapped — its h264 is
+    exactly what Chrome wants, in the one container Chrome refuses. Testing the
+    codec alone used to let the second case through as a plain file copy, and the
+    preview and the render then both got a video they could not open."""
+    if playable.is_playable(video):
         shutil.copy2(video, app_path)
         return
-    print(f"  {codec} is not browser-playable — transcoding the preview/render copy to h264…")
-    subprocess.run(
-        ["ffmpeg", "-v", "error", "-y", "-i", str(video),
-         "-c:v", "h264_videotoolbox", "-b:v", "30M",
-         "-c:a", "aac", "-b:a", "256k", "-movflags", "+faststart", str(app_path)],
-        check=True, capture_output=True, text=True,
-    )
+    playable.convert(video, app_path, on_log=lambda line: print(f"  {line}"))
 
 
 def write_captions(captions: list[dict], video: Path, copy_to_app: bool = True) -> dict[str, Path]:

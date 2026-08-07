@@ -11,7 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from .. import layout
+from .. import layout, playable
 from ..captions import APP_PUBLIC_DIR, load_cuts
 
 RECENTS_FILE = Path.home() / ".sermon" / "recents.json"
@@ -85,6 +85,26 @@ def _probe_safe(video: Path) -> dict:
 
 def video_duration(video: Path) -> float | None:
     return _probe_safe(video)["duration_sec"]
+
+
+def playable_source(video: Path) -> Path:
+    """The file the browser previews and the Resolve XML links.
+
+    The sermon itself whenever a browser can open it, and its remuxed `00_SOURCE/`
+    twin when it cannot — a `.mkv` plays back through nothing in this app, however
+    ordinary the h264 inside it is (see ../playable.py)."""
+    return video if playable.is_playable(video) else layout.playable_source(video)
+
+
+def _playable_state(video: Path, probe: bool) -> dict:
+    """Whether this sermon can be previewed, and whether making it so needs a job.
+
+    Skipped along with the ffprobe when the caller only wants a cheap listing —
+    the recents screen shows no video."""
+    if not probe or not video.is_file():
+        return {"needs_conversion": False, "playable": True}
+    target = playable_source(video)
+    return {"needs_conversion": target != video, "playable": target.is_file()}
 
 
 def _artifact(path: Path) -> dict:
@@ -275,6 +295,7 @@ def derive_state(video: Path, probe: bool = True) -> dict:
             "path": str(video),
             "name": video.name,
             "exists": video.is_file(),
+            **_playable_state(video, probe),
             **(_probe_safe(video) if (probe and video.is_file()) else {}),
         },
         "artifacts": {name: _artifact(path) for name, path in arts.items()},

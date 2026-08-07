@@ -77,6 +77,24 @@ def run_transcribe(args: argparse.Namespace) -> None:
     emit({"event": "result", "paths": {name: str(path) for name, path in paths.items()}})
 
 
+def run_convert(args: argparse.Namespace) -> None:
+    from ..playable import convert
+
+    video, out = Path(args.video), Path(args.out)
+    emit({"event": "progress", "percent": 0, "stage": "convert",
+          "detail": f"making a browser-playable copy of {video.name}…"})
+    last = {"pct": -5.0}
+
+    def on_progress(pct: float) -> None:
+        if pct - last["pct"] >= 1:  # don't flood the stream at ffmpeg speed
+            last["pct"] = pct
+            emit({"event": "progress", "percent": round(pct, 1), "stage": "convert",
+                  "detail": f"writing {out.name}… {pct:.0f}%"})
+
+    convert(video, out, on_progress=on_progress, on_log=lambda line: emit({"event": "log", "line": line}))
+    emit({"event": "result", "paths": {"playable": str(out)}})
+
+
 def run_highlights(args: argparse.Namespace) -> None:
     from ..highlights import select_highlights, write_highlights
 
@@ -199,6 +217,11 @@ def main() -> None:
     p.add_argument("--language", default="sk")
     p.add_argument("--out-dir", default=None)
     p.set_defaults(func=run_transcribe)
+
+    p = sub.add_parser("convert")
+    p.add_argument("--video", required=True)
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=run_convert)
 
     p = sub.add_parser("highlights")
     p.add_argument("--segments", required=True)

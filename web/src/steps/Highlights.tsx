@@ -215,9 +215,11 @@ export const Highlights: React.FC<{
   const [keyPresent, setKeyPresent] = useState(true);
   const done = project.steps.highlights === "done";
 
-  const videoUrl = project.video.exists
-    ? `/media/project/${project.id}/${encodeURIComponent(project.video.name)}`
-    : null;
+  // a container the browser refuses (.mkv and friends) is previewed through the
+  // remuxed twin in 00_SOURCE, which the server resolves from the project id
+  const needsConversion = project.video.needs_conversion === true;
+  const playable = project.video.playable !== false;
+  const videoUrl = project.video.exists && playable ? `/media/source/${project.id}` : null;
 
   const loadHighlights = () =>
     api
@@ -248,6 +250,27 @@ export const Highlights: React.FC<{
           GEMINI_API_KEY is not set — add it to the .env file at the repo root and restart{" "}
           <code>sermon web</code>.
         </p>
+      )}
+      {needsConversion && !playable && (
+        <div className="card">
+          <strong>{project.video.name} can't be played here yet</strong>
+          <p className="hint" style={{ margin: "6px 0 12px" }}>
+            Transcription and the vertical export read this file fine, but neither a browser nor
+            DaVinci Resolve opens its container — so the previews below and the Resolve timeline need
+            an <code>.mp4</code> copy in <code>00_SOURCE/</code> first. The video itself is normally
+            copied across untouched, without being re-encoded, which takes seconds and costs no
+            quality; only a codec the browser can't decode at all forces a real re-encode. The
+            sermon file stays exactly where it is.
+          </p>
+          <JobRunner
+            kind="convert"
+            projectId={project.id}
+            label="Make a playable copy"
+            onDone={(d) => {
+              if (d.state === "succeeded") void onRefresh();
+            }}
+          />
+        </div>
       )}
       <div className="form-row">
         <label className="field">
