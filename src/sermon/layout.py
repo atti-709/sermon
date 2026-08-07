@@ -6,6 +6,7 @@ source video and those highlight folders; everything the pipeline derives from
 the video as a whole sits in `00_SOURCE/`:
 
     <sermon folder>/
+        _SPEAKERS.txt                      who preaches here, off the festival programme
         kazen.mp4                          the source video, untouched
         00_SOURCE/                         transcript, segments, highlights, Resolve XML
         01_Boh ťa vidí/
@@ -31,6 +32,10 @@ SOURCE_DIR = "00_SOURCE"
 VERTICAL_DIR = "01_VERTICAL_NO_CAPTION"
 DAVINCI_DIR = "02_DAVINCI_EXPORT"
 CAPTIONING_DIR = "03_CAPTIONING"
+
+# who preaches in this folder, taken off the festival programme (see
+# scripts/speaker_names.py). The one file here nothing in the pipeline writes.
+SPEAKERS_FILE = "_SPEAKERS.txt"
 
 STAGE_DIRS = (VERTICAL_DIR, DAVINCI_DIR, CAPTIONING_DIR)
 CLIP_DIRS = (VERTICAL_DIR, DAVINCI_DIR)
@@ -74,6 +79,17 @@ def video_for_source_file(artifact: Path, video_name: str) -> Path:
     """The source video an artifact in `00_SOURCE/` belongs to."""
     folder = artifact.resolve().parent
     return (folder.parent if folder.name == SOURCE_DIR else folder) / video_name
+
+
+def speakers_file(sermon_dir: Path) -> Path:
+    """The sermon folder's speaker names, pre-filled from the festival programme.
+
+    Takes the folder, not the video, because it is the one artifact that predates
+    the footage: the programme is known months ahead, so the file can be written
+    into an empty folder and be waiting there when the card is copied off. It sits
+    at the top of the sermon folder rather than in `00_SOURCE/` for the same
+    reason — the people who correct it read it in Finder, not through the app."""
+    return sermon_dir / SPEAKERS_FILE
 
 
 # --- highlight level ---------------------------------------------------------
@@ -148,6 +164,15 @@ def highlight_dir_for_clip(clip: Path) -> Path | None:
     if HIGHLIGHT_DIR_RE.match(folder.name) and (folder / CAPTIONING_DIR).is_dir():
         return folder
     return None
+
+
+def sermon_dir_for_clip(clip: Path) -> Path | None:
+    """The sermon folder a clip came from — its highlight's parent.
+
+    None for a clip registered from outside the layout, which belongs to no sermon
+    folder and so has no programme to read a speaker name off."""
+    highlight = highlight_dir_for_clip(clip)
+    return highlight.parent if highlight is not None else None
 
 
 def sidecar_dir(clip: Path) -> Path:

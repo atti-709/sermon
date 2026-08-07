@@ -1,7 +1,8 @@
 export type Artifact = { path: string; exists: boolean; mtime: number | null };
 
-/** per-clip caption style; `yOffset` lifts the caption block (px, negative = lower) */
-export type CaptionStyle = { yOffset: number };
+/** per-clip caption style; `yOffset` lifts the caption block (px, negative = lower),
+ *  a non-empty `speakerName` turns on the intro graphics (bottom blur, name, logo) */
+export type CaptionStyle = { yOffset: number; speakerName?: string };
 
 export type ClipState = {
   id: string;
@@ -47,6 +48,8 @@ export type ProjectState = {
   source_dir: string;
   /** an explicit folder for finished renders; null = each one in its own highlight folder */
   output_dir: string | null;
+  /** names off `_SPEAKERS.txt` in the sermon folder; the first pre-fills each clip's intro */
+  speakers?: string[];
   clips: ClipState[];
   steps: Record<"transcribe" | "highlights" | "export" | "clips" | "captions" | "render", StepStatus>;
 };

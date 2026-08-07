@@ -102,7 +102,34 @@ def style_path(clip: Path) -> Path:
     return layout.sidecar(clip, "style.json")
 
 
-DEFAULT_CAPTION_STYLE = {"yOffset": 0}
+DEFAULT_CAPTION_STYLE = {"yOffset": 0, "speakerName": ""}
+
+# the intro card holds one line of a name; the API caps the field at the same length
+MAX_SPEAKER_LEN = 80
+MAX_SPEAKERS = 8
+
+
+def load_speakers(sermon_dir: Path | None) -> list[str]:
+    """The names on this sermon folder's `_SPEAKERS.txt`, in programme order.
+
+    One name per line, `#` comments and blank lines ignored — a format someone can
+    fix in TextEdit on the NAS without breaking anything. A folder with no such
+    file, or none the app was pointed inside, simply has no names to offer."""
+    if sermon_dir is None:
+        return []
+    path = layout.speakers_file(sermon_dir)
+    if not path.is_file():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    names: list[str] = []
+    for line in lines:
+        name = line.split("#", 1)[0].strip()
+        if name and name not in names:
+            names.append(name[:MAX_SPEAKER_LEN])
+    return names[:MAX_SPEAKERS]
 
 
 def load_style(clip: Path) -> dict:
@@ -110,10 +137,18 @@ def load_style(clip: Path) -> dict:
     if path.is_file():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            return {"yOffset": int(data.get("yOffset", 0))}
+            return {
+                "yOffset": int(data.get("yOffset", 0)),
+                "speakerName": str(data.get("speakerName", "") or ""),
+            }
         except (json.JSONDecodeError, TypeError, ValueError):
-            pass  # unreadable sidecar — fall back to the default position
-    return dict(DEFAULT_CAPTION_STYLE)
+            pass  # unreadable sidecar — fall back to the defaults
+    # Nothing saved for this clip yet, so the programme's first name pre-fills it and
+    # the clip arrives with its intro already on. Only in this branch: once a sidecar
+    # exists an empty name is the user having deliberately turned the intro off, and
+    # re-filling it from the folder would overrule them on every reload.
+    speakers = load_speakers(layout.sermon_dir_for_clip(clip))
+    return {**DEFAULT_CAPTION_STYLE, "speakerName": speakers[0] if speakers else ""}
 
 
 def artifact_paths(video: Path) -> dict[str, Path]:
@@ -246,6 +281,9 @@ def derive_state(video: Path, probe: bool = True) -> dict:
         "source_dir": str(layout.source_dir(video)),
         # None = every finished video lands in its own highlight folder
         "output_dir": str(configured) if (configured := output_dir(video)) else None,
+        # everyone the programme has preaching in this folder: the first one pre-fills
+        # each clip's intro, the rest are offered beside the field
+        "speakers": load_speakers(video.parent),
         "clips": clips,
         "steps": steps,
     }

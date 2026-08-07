@@ -15,14 +15,15 @@ const FPS = 30;
 
 export const schema = z.object({
   // filename of a clip inside public/ — its captions are expected at <name>.captions.json,
-  // its (optional) subject-tracking crop path at <name>.framing.json and its (optional)
-  // caption-position offset at <name>.style.json and its (optional) splice points
-  // at <name>.cuts.json
+  // its (optional) subject-tracking crop path at <name>.framing.json, its (optional)
+  // caption-position offset and intro speaker name at <name>.style.json and its
+  // (optional) splice points at <name>.cuts.json
   src: z.string(),
   captions: z.array(z.any()).nullable(),
   framing: z.any().nullable(),
   yOffset: z.number().nullable(),
   cuts: z.array(z.number()).nullable(),
+  speakerName: z.string().nullable(),
 });
 
 type Props = z.infer<typeof schema>;
@@ -46,15 +47,21 @@ const calculateMetadata: CalculateMetadataFunction<Props> = async ({ props }) =>
     framing = null;
   }
 
-  // caption position: an explicit prop (the render job passes one) wins over the
-  // sidecar the web app's slider writes; without either the default height applies
+  // caption style: an explicit prop (the render job passes one) wins over the
+  // sidecar the web app writes; without either the defaults apply (default
+  // caption height, no intro graphics)
   let yOffset = props.yOffset;
-  if (yOffset == null) {
+  let speakerName = props.speakerName;
+  if (yOffset == null || speakerName == null) {
     try {
       const styleRes = await fetch(staticFile(styleFileFor(props.src)));
-      if (styleRes.ok) yOffset = ((await styleRes.json()) as { yOffset?: number }).yOffset ?? null;
+      if (styleRes.ok) {
+        const style = (await styleRes.json()) as { yOffset?: number; speakerName?: string };
+        yOffset ??= style.yOffset ?? null;
+        speakerName ??= style.speakerName ?? null;
+      }
     } catch {
-      yOffset = null;
+      // leave whatever the props carried
     }
   }
 
@@ -74,7 +81,7 @@ const calculateMetadata: CalculateMetadataFunction<Props> = async ({ props }) =>
     fps: FPS,
     width: 1080,
     height: 1920,
-    props: { ...props, captions, framing, yOffset, cuts },
+    props: { ...props, captions, framing, yOffset, cuts, speakerName },
   };
 };
 
@@ -84,7 +91,7 @@ export const Root: React.FC = () => {
       id="CaptionedClip"
       component={CaptionedClip}
       schema={schema}
-      defaultProps={{"src":"clip.mov","captions":null,"framing":null,"yOffset":null,"cuts":null}}
+      defaultProps={{"src":"clip.mov","captions":null,"framing":null,"yOffset":null,"cuts":null,"speakerName":null}}
       durationInFrames={30 * 10}
       fps={FPS}
       width={1080}

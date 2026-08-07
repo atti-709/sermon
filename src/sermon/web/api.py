@@ -370,8 +370,10 @@ def get_corrections(project_id: str, clip_id: str) -> dict:
 
 
 class CaptionStyleRequest(BaseModel):
-    # camelCase mirrors the Remotion prop — the composition reads this file itself
+    # camelCase mirrors the Remotion props — the composition reads this file itself
     yOffset: int = Field(0, ge=-400, le=1000)
+    # non-empty turns on the intro graphics (bottom blur, name, logo)
+    speakerName: str = Field("", max_length=80)
 
 
 @router.get("/projects/{project_id}/clips/{clip_id}/style")
@@ -383,8 +385,8 @@ def get_style(project_id: str, clip_id: str) -> dict:
 @router.put("/projects/{project_id}/clips/{clip_id}/style")
 def put_style(project_id: str, clip_id: str, style: CaptionStyleRequest) -> dict:
     clip = _project_clip(project_id, clip_id)
-    saved = {"yOffset": style.yOffset}
-    contents = json.dumps(saved, indent=2) + "\n"
+    saved = {"yOffset": style.yOffset, "speakerName": style.speakerName.strip()}
+    contents = json.dumps(saved, indent=2, ensure_ascii=False) + "\n"
     return {"ok": True, "style": saved, "written": _write_sidecar(clip, "style.json", contents)}
 
 
@@ -492,12 +494,14 @@ def _build_job(req: JobRequest) -> JobSpec:
             raise HTTPException(422, "clip is not in captions/public yet — run the captions step first")
         out_path = layout.ensure_parent(projects.rendered_path(video, clip))
         props_file = Path(tempfile.gettempdir()) / f"sermon-props-{uuid.uuid4().hex[:8]}.json"
+        style = projects.load_style(clip)
         props = {
             "src": public_src,
             "captions": None,
             "framing": None,
-            "yOffset": projects.load_style(clip)["yOffset"],
+            "yOffset": style["yOffset"],
             "cuts": projects.load_cuts(clip) or None,
+            "speakerName": style["speakerName"] or None,
         }
         props_file.write_text(json.dumps(props), encoding="utf-8")
         argv = ["npx", "remotion", "render", "CaptionedClip", f"--props={props_file}", str(out_path)]

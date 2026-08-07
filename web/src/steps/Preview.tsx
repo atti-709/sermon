@@ -2,16 +2,18 @@ import { Player, PlayerRef } from "@remotion/player";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CaptionedClipCore } from "@captions/CaptionedClipCore";
 import { api } from "../api";
-import type { Caption, ClipState, Framing, ProjectState } from "../types";
+import type { Caption, CaptionStyle, ClipState, Framing, ProjectState } from "../types";
 
 const FPS = 30;
 
 // served from captions/public — the same files Remotion Studio and the renderer
 // use, so the preview matches the render
 const FONT_URLS = [
+  { weight: 700, url: "/media/app/fonts/Aspekta-700.ttf" },
   { weight: 600, url: "/media/app/fonts/Aspekta-600.ttf" },
   { weight: 400, url: "/media/app/fonts/Aspekta-400.ttf" },
 ];
+const INTRO_LOGO_URL = "/media/app/intro/campfest-border.png";
 
 /** index of the word being spoken at `tMs`, or -1 in the gaps between words */
 const activeCaptionIndex = (captions: Caption[], tMs: number): number => {
@@ -109,10 +111,16 @@ export const Preview: React.FC<{
   const saveTimer = useRef<number | null>(null);
   const styleTimer = useRef<number | null>(null);
 
-  // the slider's live value; tagged with its clip so switching clips falls back
-  // to that clip's saved offset without an extra effect
-  const [dragged, setDragged] = useState<{ clipId: string; yOffset: number } | null>(null);
-  const yOffset = dragged?.clipId === clip.id ? dragged.yOffset : (clip.style?.yOffset ?? 0);
+  // live edits to the style controls; tagged with their clip so switching
+  // clips falls back to that clip's saved style without an extra effect
+  const [draft, setDraft] = useState<{ clipId: string; style: CaptionStyle } | null>(null);
+  const style: CaptionStyle =
+    draft?.clipId === clip.id ? draft.style : { yOffset: 0, speakerName: "", ...clip.style };
+  const yOffset = style.yOffset;
+  const speakerName = style.speakerName ?? "";
+  // a sermon folder with several preachers on the programme (an evening programme
+  // has the evangelist and the recap) offers the ones this clip is not set to
+  const otherSpeakers = (project.speakers ?? []).filter((name) => name !== speakerName);
 
   useEffect(() => {
     setCaptions(null);
@@ -160,18 +168,19 @@ export const Preview: React.FC<{
     [project.id, clip.id, flagSaved],
   );
 
-  // the slider moves the captions in the player immediately; the sidecar the
-  // render and Studio read is written once the drag settles
-  const changeYOffset = (value: number) => {
-    setDragged({ clipId: clip.id, yOffset: value });
+  // the controls change the player immediately; the sidecar the render and
+  // Studio read is written once the edit settles
+  const changeStyle = (patch: Partial<CaptionStyle>) => {
+    const next = { ...style, ...patch };
+    setDraft({ clipId: clip.id, style: next });
     setSaveState("saving");
     if (styleTimer.current) window.clearTimeout(styleTimer.current);
     styleTimer.current = window.setTimeout(() => {
       api
-        .putStyle(project.id, clip.id, { yOffset: value })
+        .putStyle(project.id, clip.id, next)
         .then(() => {
           flagSaved();
-          void onRefresh(); // a moved caption makes an existing render stale
+          void onRefresh(); // a changed style makes an existing render stale
         })
         .catch((exc) => {
           setSaveState("error");
@@ -194,11 +203,13 @@ export const Preview: React.FC<{
       framing,
       yOffset,
       cuts: clip.cuts ?? null,
+      speakerName,
+      introLogoUrl: INTRO_LOGO_URL,
       fontUrls: FONT_URLS,
       editable: true,
       onSaveCorrections: save,
     }),
-    [clip.urls.video, captions, framing, yOffset, clip.cuts, save],
+    [clip.urls.video, captions, framing, yOffset, clip.cuts, speakerName, save],
   );
 
   if (error)
@@ -248,12 +259,39 @@ export const Preview: React.FC<{
               max={Y_OFFSET_MAX}
               step={10}
               value={yOffset}
-              onChange={(e) => changeYOffset(Number(e.target.value))}
+              onChange={(e) => changeStyle({ yOffset: Number(e.target.value) })}
             />
           </label>
           <p className="hint" style={{ marginTop: 8 }}>
             Right lifts the captions, left drops them. Saved per clip — Studio and the render use
             the same position.
+          </p>
+          <label className="field" style={{ marginTop: 16 }}>
+            <span>Speaker name</span>
+            <input
+              type="text"
+              value={speakerName}
+              maxLength={80}
+              placeholder="Meno rečníka"
+              onChange={(e) => changeStyle({ speakerName: e.target.value })}
+            />
+          </label>
+          {otherSpeakers.length > 0 && (
+            <div className="row" style={{ marginTop: 8, flexWrap: "wrap", gap: 6 }}>
+              <span className="hint">Also on the programme:</span>
+              {otherSpeakers.map((name) => (
+                <button key={name} className="sm" onClick={() => changeStyle({ speakerName: name })}>
+                  {name}
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="hint" style={{ marginTop: 8 }}>
+            Turns on the intro graphics: the bottom of the frame blurs, the name fades in and
+            hands over to the CAMPFEST logo over the first 9 seconds. Leave empty for no intro.
+            {project.speakers?.length
+              ? " Pre-filled from the festival programme (_SPEAKERS.txt in the sermon folder)."
+              : ""}
           </p>
         </div>
         <div style={{ flex: 1, minWidth: 280 }}>

@@ -4,9 +4,11 @@ import { Video } from "@remotion/media";
 import { useEffect, useMemo, useState } from "react";
 import {
   AbsoluteFill,
+  Img,
   OffthreadVideo,
   continueRender,
   delayRender,
+  interpolate,
   useCurrentFrame,
   useRemotionEnvironment,
   useVideoConfig,
@@ -37,6 +39,117 @@ const TEXT_SHADOW = "0 2px 6px rgba(0,0,0,0.42), 0 6px 28px rgba(0,0,0,0.5)";
 const BOTTOM_OFFSET = 640; // px from the bottom of the 1920px frame — keeps captions
 // above the Reels/TikTok/Shorts UI cluster (bottom ~25% of the screen)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Intro graphics — a port of the DaVinci speaker-clips template
+// (ASSETS/SpeakerClips-Template_V1/26-SpeakerClipsTemplateV1.drp): the bottom
+// of the frame blurs and darkens, the speaker's name fades in over it, hands
+// over to the CAMPFEST logo, and everything bows out before the 9-second mark.
+// Geometry and timing are measured off the template's reference render
+// (sermon_intro.mov, 25 fps), so the numbers below are in seconds and frame px.
+const INTRO_NAME_IN = [0, 0.32]; // linear fades throughout, as in the reference
+const INTRO_NAME_OUT = [4.28, 4.6];
+const INTRO_LOGO_IN = [4.64, 5.0];
+// no exit: in the template the blur, dim and logo span the whole timeline, so
+// once the name has handed over to the logo they stay to the end of the clip
+// Aspekta 700 at this size puts the name's ink exactly where the designer's
+// finished clip (sample.mp4) has it — 107 px solved from the sample's ink
+// width, baseline at y≈1465; the top pins the baseline via the font's own
+// metrics (ascent 1100/1000 em, line-height 1 → baseline 0.885 em from top)
+const INTRO_NAME_SIZE = 107;
+const INTRO_NAME_TOP = 1370;
+// the logo PNG's canvas is 1073×290 with the pill centered in it; 708 px wide
+// centers the visible pill at (540, 1430), matching the reference
+const INTRO_LOGO_WIDTH = 708;
+const INTRO_LOGO_TOP = 1335;
+// The template's adjustment clip runs a zoom blur anchored at the top of the
+// frame with the middle excluded, so streaks build toward the bottom; stacked
+// backdrop-filter layers with gradient masks give the same progressive blur.
+// Strengths are calibrated against a render of the actual template (dot-grid
+// footage through DaVinci): the blur only bites in the bottom quarter,
+// reaching σ ≈ 10 px vertically / 2 px horizontally at the frame's edge —
+// these isotropic radii track the geometric mean of that.
+const INTRO_BLUR_LAYERS = [
+  { radius: 2.5, top: 1400, solidFrom: 150 },
+  { radius: 3, top: 1510, solidFrom: 150 },
+  { radius: 3, top: 1640, solidFrom: 150 },
+  { radius: 3, top: 1780, solidFrom: 140 },
+];
+// the template's vignette, measured off the same calibration render: a faint
+// kiss at the very top and the bottom falling to half brightness at the edge
+const INTRO_DIM_GRADIENT =
+  "linear-gradient(to bottom, rgba(0,0,0,0.095) 0px, rgba(0,0,0,0.03) 150px, rgba(0,0,0,0) 400px, " +
+  "rgba(0,0,0,0) 1100px, rgba(0,0,0,0.031) 1300px, rgba(0,0,0,0.092) 1500px, rgba(0,0,0,0.254) 1700px, " +
+  "rgba(0,0,0,0.4) 1850px, rgba(0,0,0,0.5) 1920px)";
+// ---------------------------------------------------------------------------
+
+const fade = (tSec: number, [from, to]: number[]) =>
+  interpolate(tSec, [from, to], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+
+const IntroGraphics: React.FC<{ tSec: number; speakerName: string; logoUrl?: string | null }> = ({
+  tSec,
+  speakerName,
+  logoUrl,
+}) => {
+  const nameOpacity = fade(tSec, INTRO_NAME_IN) - fade(tSec, INTRO_NAME_OUT);
+  const logoOpacity = fade(tSec, INTRO_LOGO_IN);
+  return (
+    <AbsoluteFill>
+      {INTRO_BLUR_LAYERS.map(({ radius, top, solidFrom }) => (
+        <div
+          key={top}
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top,
+            bottom: 0,
+            backdropFilter: `blur(${radius}px)`,
+            WebkitBackdropFilter: `blur(${radius}px)`,
+            maskImage: `linear-gradient(to bottom, transparent 0, black ${solidFrom}px)`,
+            WebkitMaskImage: `linear-gradient(to bottom, transparent 0, black ${solidFrom}px)`,
+          }}
+        />
+      ))}
+      <div style={{ position: "absolute", inset: 0, background: INTRO_DIM_GRADIENT }} />
+      {nameOpacity > 0 ? (
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: INTRO_NAME_TOP,
+            textAlign: "center",
+            fontFamily: `${FONT_FAMILY}, ${FONT_FALLBACK}`,
+            fontWeight: 700,
+            fontSize: INTRO_NAME_SIZE,
+            lineHeight: 1,
+            color: "white",
+            textShadow: TEXT_SHADOW, // same soft legibility shadow as the captions
+            opacity: nameOpacity,
+          }}
+        >
+          {speakerName}
+        </div>
+      ) : null}
+      {logoUrl && logoOpacity > 0 ? (
+        <Img
+          src={logoUrl}
+          style={{
+            position: "absolute",
+            left: (1080 - INTRO_LOGO_WIDTH) / 2,
+            top: INTRO_LOGO_TOP,
+            width: INTRO_LOGO_WIDTH,
+            opacity: logoOpacity,
+            // the template gives the logo a centered soft shadow (drop shadow,
+            // distance 0) so the white pill holds up over bright footage
+            filter: "drop-shadow(0 0 14px rgba(0,0,0,0.73))",
+          }}
+        />
+      ) : null}
+    </AbsoluteFill>
+  );
+};
 
 // `sermon track` output: where the 9:16 crop window should sit inside the source
 // video over time (cx = crop-center X as a fraction of source width). Between
@@ -92,8 +205,13 @@ export const CaptionedClipCore: React.FC<{
   yOffset?: number | null;
   /** splice points in seconds (a hook-first export) — no caption page spans one */
   cuts?: number[] | null;
-  /** full URL of each brand-font weight the style uses (600 for the current
-   *  line, 400 for spoken ones); falls back to a system stack when missing */
+  /** who is speaking — turns on the intro graphics (blur, name, logo) */
+  speakerName?: string | null;
+  /** full URL of the intro logo (staticFile(...) in Studio, /media/app/... in the web app) */
+  introLogoUrl?: string | null;
+  /** full URL of each brand-font weight the style uses (700 for the intro
+   *  name, 600 for the current line, 400 for spoken ones); falls back to a
+   *  system stack when missing */
   fontUrls?: { weight: number; url: string }[] | null;
   /** allow click-to-edit of caption words */
   editable?: boolean;
@@ -108,6 +226,8 @@ export const CaptionedClipCore: React.FC<{
   framing,
   yOffset,
   cuts,
+  speakerName,
+  introLogoUrl,
   fontUrls,
   editable = false,
   captureClicksForStudio = false,
@@ -211,6 +331,9 @@ export const CaptionedClipCore: React.FC<{
   return (
     <AbsoluteFill style={{ backgroundColor: "black" }} showInTimeline={false}>
       <ClipVideo src={videoSrc} objectPosition={objectPosition} />
+      {speakerName?.trim() ? (
+        <IntroGraphics tSec={timeMs / 1000} speakerName={speakerName.trim()} logoUrl={introLogoUrl} />
+      ) : null}
       {page ? (
         <AbsoluteFill style={{ justifyContent: "flex-end", alignItems: "center" }}>
           <div

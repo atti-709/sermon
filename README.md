@@ -86,6 +86,7 @@ folder keeps just the source video and those highlight folders:
 
 ```
 Movies/kazen/
+  _SPEAKERS.txt                      who preaches here (optional, see Intro graphics)
   kazen.mp4                          the source video, untouched
   00_SOURCE/                         transcript, segments, highlights, Resolve XML, project sidecar
   01_Boh ťa vidí/
@@ -191,10 +192,59 @@ highlights are routinely called the same thing. The caption style is hard-coded 
 `captions/src/CaptionedClipCore.tsx`: 9:16 vertical, karaoke pages of ~3-5 words where words
 appear progressively as spoken (the full page stays visible once complete). Captions are set
 in Aspekta 600 by Ivo Dolenc, bundled at `captions/public/fonts/Aspekta-600.ttf` under the
-SIL Open Font License 1.1 (`OFL.txt` sits beside it). To rebrand, drop your own file in that
-folder and update both references to it — `FONT_FILE` in `captions/src/CaptionedClip.tsx`
-(Studio and renders) and the `fontUrl` in `web/src/steps/Preview.tsx` (the web preview);
-a system stack takes over whenever the file is missing.
+SIL Open Font License 1.1 (`OFL.txt` sits beside it). To rebrand, drop your own files in that
+folder and update both references to them — `FONT_FILES` in `captions/src/CaptionedClip.tsx`
+(Studio and renders) and `FONT_URLS` in `web/src/steps/Preview.tsx` (the web preview);
+a system stack takes over whenever a file is missing.
+
+## Intro graphics (speaker name + logo)
+
+Typing a speaker name on the Preview step turns on the branded intro, a port of the
+CAMPFEST DaVinci speaker-clips template: the bottom of the frame progressively blurs
+and darkens, the name (Aspekta 700) fades in over it and hands over to the CAMPFEST
+pill logo at ~4.6 s; the logo and the bottom treatment then stay up for the rest of
+the clip. The name is saved per clip as `speakerName` in the `.style.json` sidecar —
+the web preview, Remotion Studio and the final render all read the same file, and an
+empty name means no intro at all. Geometry and timing live at the top of
+`captions/src/CaptionedClipCore.tsx` (`INTRO_*` constants, measured off the designer's
+finished clip; blur and vignette strengths calibrated against a DaVinci render of the
+actual template); the logo is `captions/public/intro/campfest-border.png` — swap that
+file to rebrand.
+
+### Names pre-filled from the programme
+
+A sermon folder can say who preaches in it, so the field arrives filled in instead of
+being retyped off a run sheet with the diacritics guessed. Put a `_SPEAKERS.txt` next
+to the source video — one name per line, `#` for comments:
+
+```
+# Speaker names for this sermon — sobota 8.8. · HANGÁR
+#   20:15  evanjel. 25'+výzva 10'  ·  Michal Irsák - Pravda o Ježišovi
+#   22:25  recap téma + final výzva  ·  Miro Tóth - Odvaha žiť v pravde
+Michal Irsák
+Miro Tóth
+```
+
+The first name pre-fills the intro card of every clip cut from that sermon; the rest
+appear as buttons under the field, for a folder with more than one preacher in it (an
+evening programme has the evangelist and the recap). The pre-fill only applies until
+the clip has a `.style.json` of its own — after that the clip keeps whatever is in the
+field, an empty name included, and nothing writes back to `_SPEAKERS.txt`.
+
+For CampFest, `scripts/speaker_names.py` fills these in from the programme
+spreadsheet across a whole festival tree:
+
+```bash
+uv run scripts/speaker_names.py \
+    --schedule "~/Movies/Campfest2026/SCHEDULE/CF 2026 - PROGRAM.xlsx" \
+    ~/Movies/Campfest2026            # --dry-run to look first, --force to replace
+```
+
+It reads every venue's columns off each day's sheet, keeps the rows that are somebody
+preaching (`Seminár`, `téma`, `evanjelizácia`, `recap téma`), works out which side of
+`Meno - Názov prednášky` is the person, and matches each one to its folder under
+`CF/<day>/VIDEOS/04_SERMONS/`. Folders are never created and existing files are kept
+unless `--force` — a name corrected by hand has to survive a re-run.
 
 ## Speaker tracking (the 9:16 crop follows the preacher)
 

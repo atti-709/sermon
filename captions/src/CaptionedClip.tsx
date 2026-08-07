@@ -8,9 +8,13 @@ import { CaptionedClipCore, type Framing } from "./CaptionedClipCore";
 // The sermon web app renders the core directly with its own URLs + save API.
 
 const FONT_FILES = [
+  { weight: 700, file: "fonts/Aspekta-700.ttf" },
   { weight: 600, file: "fonts/Aspekta-600.ttf" },
   { weight: 400, file: "fonts/Aspekta-400.ttf" },
 ];
+
+/** the CAMPFEST pill the intro hands over to after the speaker's name */
+export const INTRO_LOGO_FILE = "intro/campfest-border.png";
 
 export const captionsFileFor = (src: string) => src.replace(/\.[^.]+$/, "") + ".captions.json";
 export const framingFileFor = (src: string) => src.replace(/\.[^.]+$/, "") + ".framing.json";
@@ -27,7 +31,8 @@ export const CaptionedClip: React.FC<{
   framing?: Framing | null;
   yOffset?: number | null;
   cuts?: number[] | null;
-}> = ({ src, captions, framing, yOffset, cuts }) => {
+  speakerName?: string | null;
+}> = ({ src, captions, framing, yOffset, cuts, speakerName }) => {
   const { isStudio, isRendering } = getRemotionEnvironment();
   const editable = isStudio && !isRendering;
 
@@ -38,6 +43,8 @@ export const CaptionedClip: React.FC<{
       framing={framing}
       yOffset={yOffset}
       cuts={cuts}
+      speakerName={speakerName}
+      introLogoUrl={staticFile(INTRO_LOGO_FILE)}
       fontUrls={FONT_FILES.map(({ weight, file }) => ({ weight, url: staticFile(file) }))}
       editable={editable}
       captureClicksForStudio={editable}
