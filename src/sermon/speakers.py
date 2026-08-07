@@ -22,6 +22,11 @@ Turns become **hard cuts**, never pans: panning across two metres of stage to th
 speaker is exactly the shot a human operator would never make. ../track.py already treats a
 cut as a segment boundary and starts the next segment where the new subject is, so the
 timeline this module returns is fed in as cuts and the camera steps.
+
+Where each cut *lands* is decided separately from whether it happens: the scores say a
+switch is real, but their boundary is smeared by the measuring window, so the cut itself is
+placed on the incoming speaker's first observed mouth movement — on the breath before their
+line when there is one, and never before their face has been seen at all (`_refine_cut`).
 """
 
 import subprocess
@@ -53,7 +58,23 @@ MIN_MOUTH_ACTIVITY = 0.005  # aperture change per sample below this is a still m
 ACTIVITY_MARGIN = 2.2  # a challenger must beat the current speaker by this much...
 SWITCH_CONFIRM_SEC = 0.9  # ...for this long, before the frame changes hands
 MIN_DWELL_SEC = 2.0  # and no shot is shorter than this, whatever the mouths do
+OWNER_LOST_SEC = 1.0  # the frame's owner unseen this long is gone, not pausing: their
+# successor is confirmed on a startle reflex and the minimum shot is waived — holding a
+# position nobody stands at anymore is the worse shot, and when the vanished face is the
+# same person re-detected after a reframe, min_jump keeps the handoff invisible anyway
+LOST_CONFIRM_SEC = 0.3
+# Where exactly a confirmed switch cuts. The scores' own boundary is smeared: the window
+# is centered, so a challenger "leads" up to half a window before they actually start —
+# cutting there yanks the outgoing speaker away mid-sentence. The cut is therefore placed
+# on the incoming mouth's first sustained movement, found near the smeared boundary:
+ONSET_BACK_SEC = 0.5  # the boundary may trail the real onset this much...
+ONSET_FWD_SEC = 2.0  # ...but mostly leads it, by up to half a window and change
+ONSET_SPAN = 3  # consecutive samples of movement that count as "started talking"
+BREATH_BACK_SEC = 0.6  # a pause ending within this of the onset is the breath before
+# the line, and the cut belongs where speech resumes after it
 AUDIO_RATE = 16000  # the envelope only needs speech band, so 16 kHz mono is plenty
+SILENCE_FLOOR = 1e-4  # an envelope this weak at its loud percentile is digital silence,
+# and thresholding it would promote the noise floor to "speech"
 # ---------------------------------------------------------------------------
 
 
@@ -133,10 +154,13 @@ def audio_envelope(video: Path, start: float | None, duration: float | None,
 
 
 def voiced_mask(envelope: np.ndarray | None, n_samples: int) -> np.ndarray:
-    """Which samples have somebody speaking. All of them when there is no audio."""
+    """Which samples have somebody speaking. All of them when there is no usable audio —
+    a missing track, or one so quiet the threshold would only be slicing noise."""
     if envelope is None or not envelope.any():
         return np.ones(n_samples, dtype=bool)
     loud = float(np.percentile(envelope, LOUD_PERCENTILE))
+    if loud < SILENCE_FLOOR:
+        return np.ones(n_samples, dtype=bool)
     return envelope > VOICE_FLOOR_FRAC * loud
 
 
@@ -213,12 +237,43 @@ def _positions(track: Track, n_samples: int, sample_hz: float) -> np.ndarray:
 # Turn taking
 
 
+def _refine_cut(track: Track, activity: np.ndarray, voiced: np.ndarray,
+                voiced_wide: np.ndarray, guess: float, floor: float,
+                sample_hz: float) -> float:
+    """Where the incoming speaker actually starts — the editor's cut point.
+
+    `guess` is where the windowed scores first tipped, and since the window is centered,
+    up to half of it is evidence from the future: cutting there puts the new face up
+    while the outgoing speaker is still mid-sentence. The raw series knows better. The
+    cut goes on the incoming mouth's first sustained movement near the guess; when a
+    pause ends just before that onset, on the moment speech resumes after the breath —
+    the line then starts right on the new shot. And never before the incoming face has
+    been seen at all: its position before that is extrapolation, and the source may
+    still be mid-transition to the shot that contains it."""
+    n = len(voiced)
+    moving = np.nan_to_num(activity)
+    lo = max(0, int(np.ceil(floor * sample_hz)),
+             int(round((guess - ONSET_BACK_SEC) * sample_hz)))
+    hi = min(n - ONSET_SPAN, int(round((guess + ONSET_FWD_SEC) * sample_hz)))
+    cut = guess
+    for k in range(lo, hi + 1):
+        if (float(np.mean(moving[k:k + ONSET_SPAN])) >= MIN_MOUTH_ACTIVITY
+                and bool(voiced_wide[k:k + ONSET_SPAN].any())):
+            back = max(0, k - int(round(BREATH_BACK_SEC * sample_hz)))
+            quiet = [j for j in range(back, k) if not voiced[j]]
+            cut = (quiet[-1] + 1) / sample_hz if quiet else k / sample_hz
+            break
+    return max(cut, floor, track.t[0])
+
+
 def speaker_timeline(tracks: list[Track], envelope: np.ndarray | None, n_samples: int,
                      sample_hz: float) -> list[Turn]:
     """Split the clip into turns: which track owns the frame, from when to when.
 
-    The window is centered — this runs offline, so unlike a live operator it can see the
-    speech starting and cut on it rather than after it."""
+    The scoring window is centered — this runs offline, so unlike a live operator it can
+    see speech coming. The flip side is that the window's own boundaries lead the real
+    ones, so each confirmed switch is then *placed* by `_refine_cut`, on the incoming
+    speaker's actual onset."""
     if not tracks:
         return []
     duration = n_samples / sample_hz
@@ -226,15 +281,29 @@ def speaker_timeline(tracks: list[Track], envelope: np.ndarray | None, n_samples
         return [Turn(0.0, duration, tracks[0].id)]
 
     voiced = voiced_mask(envelope, n_samples)
+    # movement measured *into* a sample happened during the previous bin, so speech in
+    # either bin makes it attributable to talking — matters right at onsets
+    voiced_wide = voiced.copy()
+    voiced_wide[1:] |= voiced[:-1]
     activity = {tr.id: _activity(tr, n_samples, sample_hz) for tr in tracks}
+    by_id = {tr.id: tr for tr in tracks}
     half = max(1, int(round(ACTIVITY_WIN_SEC * sample_hz / 2)))
+
+    # when each track was last actually observed, per sample — a dead track's owner
+    # must not keep the frame on the strength of nobody outscoring a corpse
+    last_seen: dict[int, np.ndarray] = {}
+    for track in tracks:
+        seen_at = np.full(n_samples, -np.inf)
+        idx = np.clip(np.round(np.asarray(track.t) * sample_hz).astype(int), 0, n_samples - 1)
+        seen_at[idx] = np.asarray(track.t)
+        last_seen[track.id] = np.maximum.accumulate(seen_at)
 
     def window_scores(i: int) -> dict[int, float]:
         """Each face's mouth movement around sample `i`, counted only where somebody is
         audibly speaking. That condition is the whole audio-visual correlation: a listener
         who nods or laughs in a pause contributes nothing, because the pause is not voiced."""
         lo, hi = max(0, i - half), min(n_samples, i + half + 1)
-        window_voiced = voiced[lo:hi]
+        window_voiced = voiced_wide[lo:hi]
         if int(window_voiced.sum()) < MIN_VOICED_SAMPLES:
             return {}
         scores = {}
@@ -273,10 +342,14 @@ def speaker_timeline(tracks: list[Track], envelope: np.ndarray | None, n_samples
         if challenger != best_id:
             challenger, challenger_since = best_id, t
             continue
-        if t - challenger_since >= SWITCH_CONFIRM_SEC and t - turn_start >= MIN_DWELL_SEC:
-            # the cut lands where the challenger started talking, not where the evidence
-            # finished accumulating — offline, there is no reason to cut late
-            cut_at = max(challenger_since, turn_start + MIN_DWELL_SEC)
+        # a vanished owner (walked off, source changed shots) is not a speaker holding
+        # their turn: their successor is confirmed fast and the minimum shot is waived
+        owner_gone = t - float(last_seen[current][i]) > OWNER_LOST_SEC
+        confirm = LOST_CONFIRM_SEC if owner_gone else SWITCH_CONFIRM_SEC
+        if t - challenger_since >= confirm and (owner_gone or t - turn_start >= MIN_DWELL_SEC):
+            floor = turn_start + (LOST_CONFIRM_SEC if owner_gone else MIN_DWELL_SEC)
+            cut_at = _refine_cut(by_id[best_id], activity[best_id], voiced, voiced_wide,
+                                 challenger_since, floor, sample_hz)
             turns.append(Turn(turn_start, cut_at, current, turn_score, turn_rival))
             current, turn_start, challenger = best_id, cut_at, None
             turn_score, turn_rival = best, held

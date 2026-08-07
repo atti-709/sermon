@@ -336,9 +336,17 @@ boundary the solver starts afresh at, so the camera lands on the new speaker in 
 What keeps that from flickering:
 
 - A challenger must beat **the current speaker** by 2.2× for 0.9 s before the frame changes
-  hands, and no shot is shorter than 2 s. Interjections and back-channel "mhm"s come to nothing.
-- The window is **centered**, not trailing: offline there is no reason to cut late the way a
-  live operator must, so the cut lands where the new speaker started talking.
+  hands, and no shot is shorter than 2 s. Weak interjections and back-channel "mhm"s come to
+  nothing; a strong one (~5× the held speaker) earns its two-second shot.
+- *Whether* to cut and *where* are decided separately. The scores' own boundary is smeared by
+  the measuring window (centered, so it leads the truth by up to half a window), so each
+  confirmed cut is placed on the incoming speaker's **first observed mouth movement** — on the
+  breath before their line when there is one, and **never before their face has been seen**:
+  its position before that is extrapolation, and the source may still be mid-transition to the
+  shot that contains it. In practice the line's first syllable may lead the picture by a
+  beat — a J-cut, which is what a human editor would do anyway.
+- A vanished owner (walked off, source changed shots) is not a speaker holding their turn:
+  the successor is confirmed on a startle reflex instead of the full 0.9 s.
 - A turn only becomes a cut if the frame actually has to **move** ~0.4 of a crop width. A face
   lost for a moment (head turned away, hand over the mouth) comes back as a fresh track, and
   handing the shot from one fragment of a person to the next must not cut to where the camera
