@@ -301,3 +301,18 @@ Either way the camera behaves the same:
   subject position actually jumps across them — the camera then snaps exactly at the cut
   instead of gliding. LED-wall slide changes behind the speaker are ignored.
 - No faces at all → the crop stays centered, same as before tracking existed.
+
+**More than one person in frame** (a panel, an interview) breaks the "biggest face is the
+speaker" guess: four people side by side score alike, so the camera locks onto whoever the
+detector happened to like in the first frame and stays there while the others talk off-screen.
+Nothing detects who is *speaking*, so the choice is yours to make: press **Follow one person**
+under a highlight's preview on the Highlights step and click them. The 9:16 window the export
+would cut is drawn over the picture as you aim, and the pick is saved into the highlights file
+as `subject_x` (normalized x), so re-exports and the notes keep it.
+
+The pick then seeds the track and keeps it on a short leash — a detection more than ~0.12 of
+the frame width from the running track is treated as a different person, even when it is the
+only face on screen, which is what stops the track from hopping to the neighbour during a
+blind stretch. Both segments of a hook-first export share the one pick (they are tracked
+separately, so otherwise each could lock onto a different panelist). A click within ~0.08 of a
+real face snaps to it; a pick nobody matches holds a still crop right there.

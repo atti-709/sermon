@@ -178,8 +178,9 @@ def run_export_vertical(args: argparse.Namespace) -> None:
     out = Path(args.out)
     hook = (args.hook_start, args.hook_end) if args.hook_start is not None and args.hook_end is not None else None
     opening = f" (opening with the {args.hook_end - args.hook_start:.0f}s hook)" if hook else ""
+    who = "the person you picked" if args.subject_x is not None else "the speaker"
     emit({"event": "progress", "percent": None, "stage": "tracking",
-          "detail": f"tracking the speaker in {args.start:.0f}s–{args.end:.0f}s{opening} (Apple Vision)…"})
+          "detail": f"tracking {who} in {args.start:.0f}s–{args.end:.0f}s{opening} (Apple Vision)…"})
     last = {"pct": -5.0}
 
     def on_progress(pct: float) -> None:
@@ -189,7 +190,8 @@ def run_export_vertical(args: argparse.Namespace) -> None:
                   "detail": f"rendering the vertical clip… {pct:.0f}%"})
 
     with contextlib.redirect_stdout(_LineWriter(lambda line: emit({"event": "log", "line": line}))):
-        export_vertical_clip(video, args.start, args.end, out, on_progress=on_progress, hook=hook)
+        export_vertical_clip(video, args.start, args.end, out, on_progress=on_progress, hook=hook,
+                             subject_x=args.subject_x)
     emit({"event": "result", "paths": {"vertical": str(out)}})
 
 
@@ -250,6 +252,8 @@ def main() -> None:
     # both present: cut this window in front of the passage (hook-first clip)
     p.add_argument("--hook-start", type=float, default=None)
     p.add_argument("--hook-end", type=float, default=None)
+    # normalized x of the person to follow, for a frame that holds more than one
+    p.add_argument("--subject-x", type=float, default=None)
     p.add_argument("--out", required=True)
     p.set_defaults(func=run_export_vertical)
 

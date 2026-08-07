@@ -98,12 +98,17 @@ def export_vertical_clip(
     out_path: Path,
     on_progress: Callable[[float], None] | None = None,
     hook: tuple[float, float] | None = None,
+    subject_x: float | None = None,
 ) -> Path:
     """Track the speaker in [start_sec, end_sec] of `video` and render that
     window as a 1080x1920 clip with the crop following the speaker.
 
     `hook` is an optional (start, end) window of the same video to play first —
-    usually a moment from inside the passage, which then repeats in context."""
+    usually a moment from inside the passage, which then repeats in context.
+
+    `subject_x` picks which person to follow when the frame holds several (see
+    ../track.py). Every segment gets the same one: they are tracked separately, so
+    without it the hook and the passage can each lock onto a different panelist."""
     video = video.resolve()
     out_path = layout.ensure_parent(out_path.resolve())  # the filtergraph script lands here too
     meta = probe_video(video)
@@ -126,7 +131,7 @@ def export_vertical_clip(
         if len(cuts) > 1:
             print(f"  segment {i + 1}/{len(cuts)}: {start:.1f}s + {duration:.1f}s")
         t_grid, camera, _cuts, _crop_frac, _samples = compute_camera_path(
-            video, meta, start=start, duration=duration
+            video, meta, start=start, duration=duration, subject_x=subject_x
         )
         # the solved path, sampled at every output frame (frame counts restart per
         # input: -ss precedes -i), as the crop's fractional left edge in source px

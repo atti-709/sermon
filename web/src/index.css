@@ -517,6 +517,34 @@ label.field {
   flex-shrink: 0;
   width: 340px;
 }
+/* the player, with the 9:16 crop window drawn over it */
+.hl-stage {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius);
+}
+.crop-guide {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.crop-guide.picking {
+  pointer-events: auto;
+  cursor: crosshair;
+  background: color-mix(in srgb, var(--bg) 18%, transparent);
+}
+.crop-window {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+/* while picking, everything the vertical clip would leave out goes dark, so the
+   window under the cursor reads as the whole frame the export keeps */
+.crop-guide.picking .crop-window {
+  box-shadow: 0 0 0 9999px color-mix(in srgb, var(--bg) 55%, transparent);
+}
 .hl-card .hl-head {
   display: flex;
   align-items: flex-start;

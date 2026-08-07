@@ -87,6 +87,9 @@ export type Highlight = {
   scores: { hook: number; flow: number; value: number; reach: number };
   score_reason: string;
   excerpt: string;
+  /** normalized x [0..1] of the person the vertical crop follows — set by hand when
+   *  the frame holds several people; absent lets tracking pick the largest face */
+  subject_x?: number | null;
   /** server-augmented: the vertical tracked export for this highlight */
   vertical?: { index: number; path: string; exists: boolean };
   /** server-augmented: this highlight's own folder, `<dir>/01_<title>` */

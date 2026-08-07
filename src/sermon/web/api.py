@@ -201,21 +201,31 @@ def get_highlights(project_id: str) -> dict:
     return data
 
 
-class HighlightEndRequest(BaseModel):
-    end_sec: float
+class HighlightPatchRequest(BaseModel):
+    """What the UI may edit on one highlight. An omitted field is left alone; the
+    two are separate PATCHes in practice, not one form."""
+
+    end_sec: float | None = None
+    # normalized x [0..1] of the person the vertical crop should follow, for footage
+    # with several people in frame (see ../track.py). An explicit null clears the
+    # pick and tracking goes back to choosing the largest face itself.
+    subject_x: float | None = Field(None, ge=0.0, le=1.0)
 
 
 MIN_HIGHLIGHT_SEC = 5.0
 
 
 @router.patch("/projects/{project_id}/highlights/{index}")
-def update_highlight_end(project_id: str, index: int, req: HighlightEndRequest) -> dict:
-    """Move one highlight's out point (1-based index, as ranked in the file).
+def update_highlight(project_id: str, index: int, req: HighlightPatchRequest) -> dict:
+    """Edit one highlight in place (1-based index, as ranked in the file).
 
-    Gemini picks the end from the transcript alone, so it regularly lands a beat
-    early or late; the length is really only judgeable while watching. Rewriting
-    the highlights file means the vertical export, the Resolve XML and the
-    markdown notes all follow one edit."""
+    The out point, because Gemini picks the end from the transcript alone and so
+    regularly lands a beat early or late — the length is really only judgeable
+    while watching. The subject, because a landscape frame may hold four people and
+    only the viewer knows which one the 9:16 crop should follow.
+
+    Rewriting the highlights file means the vertical export, the Resolve XML and
+    the markdown notes all follow one edit."""
     from ..highlights import write_highlights
     from ..transcribe import format_timestamp
 
@@ -229,23 +239,32 @@ def update_highlight_end(project_id: str, index: int, req: HighlightEndRequest) 
         raise HTTPException(404, f"highlight {index} does not exist")
 
     highlight = items[index - 1]
-    end = float(req.end_sec)
-    ceiling = projects.video_duration(video)
-    if ceiling is not None:
-        end = min(end, ceiling)
-    end = max(end, highlight["start_sec"] + MIN_HIGHLIGHT_SEC)
-    highlight["end_sec"] = round(end, 3)
-    highlight["end"] = format_timestamp(end)
-    highlight["duration_sec"] = round(end - highlight["start_sec"], 1)
+    sent = req.model_fields_set  # "cleared" and "not mentioned" are different asks
 
-    # the excerpt is the transcript of the range, so it has to follow the edit
-    segments_file = projects.artifact_paths(video)["segments"]
-    if segments_file.is_file():
-        segments = json.loads(segments_file.read_text(encoding="utf-8"))["segments"]
-        highlight["excerpt"] = " ".join(
-            s["text"] for s in segments
-            if s["start"] >= highlight["start_sec"] - 0.5 and s["end"] <= end + 0.5
-        )
+    if req.end_sec is not None:
+        end = float(req.end_sec)
+        ceiling = projects.video_duration(video)
+        if ceiling is not None:
+            end = min(end, ceiling)
+        end = max(end, highlight["start_sec"] + MIN_HIGHLIGHT_SEC)
+        highlight["end_sec"] = round(end, 3)
+        highlight["end"] = format_timestamp(end)
+        highlight["duration_sec"] = round(end - highlight["start_sec"], 1)
+
+        # the excerpt is the transcript of the range, so it has to follow the edit
+        segments_file = projects.artifact_paths(video)["segments"]
+        if segments_file.is_file():
+            segments = json.loads(segments_file.read_text(encoding="utf-8"))["segments"]
+            highlight["excerpt"] = " ".join(
+                s["text"] for s in segments
+                if s["start"] >= highlight["start_sec"] - 0.5 and s["end"] <= end + 0.5
+            )
+
+    if "subject_x" in sent:
+        if req.subject_x is None:
+            highlight.pop("subject_x", None)
+        else:
+            highlight["subject_x"] = round(float(req.subject_x), 5)
 
     write_highlights(
         items,
@@ -483,6 +502,15 @@ def _build_job(req: JobRequest) -> JobSpec:
         hook_start, hook_end = p.get("hook_start_sec"), p.get("hook_end_sec")
         if hook_start is not None and hook_end is not None:
             argv += ["--hook-start", str(float(hook_start)), "--hook-end", str(float(hook_end))]
+        # optional: follow the person picked in the preview rather than the largest face
+        if p.get("subject_x") is not None:
+            try:
+                subject_x = float(p["subject_x"])
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(422, "subject_x must be a number between 0 and 1") from exc
+            if not 0.0 <= subject_x <= 1.0:
+                raise HTTPException(422, "subject_x must be a number between 0 and 1")
+            argv += ["--subject-x", f"{subject_x:.5f}"]
         return JobSpec(argv, repo_cwd, {"paths": {"vertical": str(out)}}, outputs=[out])
 
     if req.kind in ("captions", "track"):

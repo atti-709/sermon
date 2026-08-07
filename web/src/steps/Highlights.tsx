@@ -16,9 +16,17 @@ const fmtClock = (sec: number): string => {
 };
 
 /** Export range for one highlight: hook-first cuts the hook moment in front of the
- *  passage, otherwise the passage is widened to cover a hook that falls outside it. */
-const exportParams = (h: Highlight, rank: number, hookFirst: boolean, endSec: number) => {
+ *  passage, otherwise the passage is widened to cover a hook that falls outside it.
+ *  `subjectX` names who the crop follows when the frame holds more than one person. */
+const exportParams = (
+  h: Highlight,
+  rank: number,
+  hookFirst: boolean,
+  endSec: number,
+  subjectX: number | null,
+) => {
   const hasHook = h.hook_start_sec != null && h.hook_end_sec != null;
+  const subject = subjectX == null ? {} : { subject_x: subjectX };
   if (hookFirst && hasHook) {
     return {
       start_sec: h.start_sec,
@@ -26,12 +34,14 @@ const exportParams = (h: Highlight, rank: number, hookFirst: boolean, endSec: nu
       hook_start_sec: h.hook_start_sec,
       hook_end_sec: h.hook_end_sec,
       index: rank,
+      ...subject,
     };
   }
   return {
     start_sec: Math.min(h.start_sec, h.hook_start_sec ?? h.start_sec),
     end_sec: Math.max(endSec, h.hook_end_sec ?? endSec),
     index: rank,
+    ...subject,
   };
 };
 
@@ -40,14 +50,26 @@ const HighlightCard: React.FC<{
   rank: number;
   videoUrl: string | null;
   videoDuration: number | null;
+  videoAspect: number | null;
   projectId: string;
   hookFirst: boolean;
   maxDuration: number;
   onExported: () => void;
-}> = ({ highlight: h, rank, videoUrl, videoDuration, projectId, hookFirst, maxDuration, onExported }) => {
-  // the out point is edited here and saved back into the highlights file, so the
-  // export, the Resolve XML and the notes all follow it
+}> = ({
+  highlight: h,
+  rank,
+  videoUrl,
+  videoDuration,
+  videoAspect,
+  projectId,
+  hookFirst,
+  maxDuration,
+  onExported,
+}) => {
+  // the out point and the person to follow are edited here and saved back into the
+  // highlights file, so the export, the Resolve XML and the notes all follow them
   const [endSec, setEndSec] = useState(h.end_sec);
+  const [subjectX, setSubjectX] = useState<number | null>(h.subject_x ?? null);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const saveTimer = useRef<number | null>(null);
 
@@ -61,13 +83,23 @@ const HighlightCard: React.FC<{
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
       api
-        .setHighlightEnd(projectId, rank, clamped)
+        .patchHighlight(projectId, rank, { end_sec: clamped })
         .then((updated) => {
           setEndSec(updated.end_sec); // the server clamps to the video's length
           setSaveState("saved");
         })
         .catch(() => setSaveState("error"));
     }, 400);
+  };
+
+  // one click, so it saves straight away rather than on a debounce like the slider
+  const changeSubject = (x: number | null) => {
+    setSubjectX(x);
+    setSaveState("saving");
+    api
+      .patchHighlight(projectId, rank, { subject_x: x })
+      .then(() => setSaveState("saved"))
+      .catch(() => setSaveState("error"));
   };
 
   const duration = endSec - h.start_sec;
@@ -84,6 +116,9 @@ const HighlightCard: React.FC<{
           hookStartSec={h.hook_start_sec}
           hookEndSec={h.hook_end_sec}
           onSetEnd={changeEnd}
+          sourceAspect={videoAspect}
+          subjectX={subjectX}
+          onPickSubject={changeSubject}
         />
       )}
       <div style={{ flex: 1, minWidth: 260 }}>
@@ -168,7 +203,7 @@ const HighlightCard: React.FC<{
           <JobRunner
             kind="export_vertical"
             projectId={projectId}
-            params={exportParams(h, rank, hookFirst, endSec)}
+            params={exportParams(h, rank, hookFirst, endSec, subjectX)}
             label={h.vertical?.exists ? "Re-export vertical" : "Export vertical for DaVinci"}
             onDone={(done) => {
               if (done.state === "succeeded") onExported();
@@ -227,6 +262,8 @@ export const Highlights: React.FC<{
     project.video.exists && playable
       ? `/media/source/${project.id}/${encodeURIComponent(playableName)}`
       : null;
+  const { width, height } = project.video;
+  const videoAspect = width && height ? width / height : null;
 
   const loadHighlights = () =>
     api
@@ -248,7 +285,9 @@ export const Highlights: React.FC<{
         candidates with a hook moment and a virality score. Preview a candidate, then{" "}
         <strong>Export vertical</strong>: the speaker gets tracked and the clip comes out as a
         1080×1920 file that opens with its hook, ready for your DaVinci edit — B-roll lands in the
-        final vertical frame. Each export gets a folder of its own next to the sermon —{" "}
+        final vertical frame. When several people share the frame — a panel, an interview — use{" "}
+        <strong>Follow one person</strong> under a preview to say whose face the crop keeps.
+        Each export gets a folder of its own next to the sermon —{" "}
         <code>01_Title/01_VERTICAL_NO_CAPTION/</code> — and the finished video lands in that
         folder's root at the end.
       </p>
@@ -352,6 +391,7 @@ export const Highlights: React.FC<{
               rank={i + 1}
               videoUrl={videoUrl}
               videoDuration={project.video.duration_sec ?? null}
+              videoAspect={videoAspect}
               projectId={project.id}
               hookFirst={hookFirst}
               maxDuration={maxDuration}

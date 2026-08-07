@@ -49,12 +49,17 @@ export const api = {
   getProject: (id: string) => request<ProjectState>(`/api/projects/${id}`),
   transcript: (id: string) => request<SegmentsFile>(`/api/projects/${id}/transcript`),
   highlights: (id: string) => request<HighlightsFile>(`/api/projects/${id}/highlights`),
-  /** move a highlight's out point (1-based rank) — rewrites the highlights file */
-  setHighlightEnd: (id: string, index: number, endSec: number) =>
+  /** edit one highlight (1-based rank) — rewrites the highlights file, so the export,
+   *  the Resolve XML and the notes all follow. `subject_x: null` clears the pick. */
+  patchHighlight: (
+    id: string,
+    index: number,
+    patch: { end_sec?: number; subject_x?: number | null },
+  ) =>
     request<Highlight>(`/api/projects/${id}/highlights/${index}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ end_sec: endSec }),
+      body: JSON.stringify(patch),
     }),
   setOutputDir: (id: string, path: string) =>
     post<{ output_dir: string }>(`/api/projects/${id}/output-dir`, { path }),

@@ -10,6 +10,12 @@ look-ahead) once they have clearly moved — less motion beats more motion.
 Detection runs on the Apple Neural Engine via the Vision framework (pyobjc), a few ms per
 frame. Scene cuts are detected with ffmpeg and only honored when the subject position actually
 jumps across them (LED-wall slide changes behind the speaker must not snap the camera).
+
+Which face is "the speaker" is decided by size and confidence, which is the right guess for a
+sermon and the wrong one for a panel: four people side by side all score alike, so the pick
+falls to whoever the detector liked in the first frame. For that footage the caller passes
+`subject_x` — the position of the person to follow, chosen by hand in the web UI — and it
+becomes the track's seed and its leash, so the camera stays on that person instead.
 """
 
 import json
@@ -49,6 +55,11 @@ SCENE_THRESHOLD = 0.20  # ffmpeg scene score candidate threshold (candidates are
 # they only take effect when the subject position actually jumps across them)
 CUT_MIN_JUMP = 0.075  # subject must jump this far across a candidate cut to accept it
 FACE_MIN_CONFIDENCE = 0.3
+TRACK_GATE = 0.08  # a detection this far from the running track is a different person...
+TRACK_GATE_WIDEN = 0.4  # ...and the gate opens this fast (width/s) while the track is blind
+TRACK_GATE_MAX = 0.5  # up to here — a speaker who crossed the stage unseen is still theirs
+PICKED_GATE_MAX = 0.12  # with a subject picked by hand the leash stays short instead: people
+# on a panel sit ~0.2 width apart, and no blind stretch may let the track hop to the next one
 KEYFRAME_EPSILON = 0.0008  # Douglas-Peucker tolerance on the emitted path
 # ---------------------------------------------------------------------------
 
@@ -115,8 +126,11 @@ def _scene_cut_candidates(video: Path, start: float | None = None,
 
 
 def _detect_samples(video: Path, meta: dict, sample_hz: float, start: float | None = None,
-                    duration: float | None = None) -> list[Sample]:
-    """Decode frames at `sample_hz` and find the main subject with the Vision framework."""
+                    duration: float | None = None, seed_x: float | None = None) -> list[Sample]:
+    """Decode frames at `sample_hz` and find the main subject with the Vision framework.
+
+    `seed_x` names the person to follow (normalized [0..1]): the track starts there
+    instead of on the biggest face, and keeps a short leash for the rest of the clip."""
     import Quartz
     import Vision
 
@@ -134,7 +148,9 @@ def _detect_samples(video: Path, meta: dict, sample_hz: float, start: float | No
 
     color_space = Quartz.CGColorSpaceCreateDeviceRGB()
     samples: list[Sample] = []
-    last: tuple[float, float] | None = None  # (t, cx) of the last confident subject fix
+    # (t, cx) of the last confident subject fix — a hand-picked subject is one already
+    last: tuple[float, float] | None = None if seed_x is None else (0.0, seed_x)
+    gate_max = TRACK_GATE_MAX if seed_x is None else PICKED_GATE_MAX
 
     index = 0
     assert proc.stdout is not None
@@ -144,6 +160,10 @@ def _detect_samples(video: Path, meta: dict, sample_hz: float, start: float | No
             break
         t = index / sample_hz
         index += 1
+
+        # how far a detection may sit from the running track and still be the same
+        # person; it opens while the track is blind, up to this mode's ceiling
+        gate = 0.0 if last is None else min(TRACK_GATE + TRACK_GATE_WIDEN * (t - last[0]), gate_max)
 
         provider = Quartz.CGDataProviderCreateWithData(None, buf, frame_bytes, None)
         image = Quartz.CGImageCreate(
@@ -164,10 +184,12 @@ def _detect_samples(video: Path, meta: dict, sample_hz: float, start: float | No
             cy = 1.0 - (bb.origin.y + bb.size.height / 2)
             score = r.confidence() * np.sqrt(bb.size.height)
             if last is not None:
-                # favor the face nearest the running track; the gate widens while blind
-                gate = min(0.08 + 0.4 * (t - last[0]), 0.5)
+                # favor the face nearest the running track, and drop the ones too far
+                # from it to be the subject. A hand-picked subject holds that leash even
+                # when the only face on screen is somebody else's — a neighbour on the
+                # panel is still the wrong person, however alone they are in the frame.
                 dist = abs(cx - last[1])
-                if dist > gate and len(face_req.results()) > 1:
+                if dist > gate and (seed_x is not None or len(face_req.results()) > 1):
                     continue
                 score -= 1.5 * dist
             candidates.append((score, cx, cy, float(r.confidence()), "face"))
@@ -185,8 +207,7 @@ def _detect_samples(video: Path, meta: dict, sample_hz: float, start: float | No
                 cy = 1.0 - (bb.origin.y + bb.size.height / 2)
                 score = 0.5 * float(r.confidence()) * np.sqrt(bb.size.width)
                 if last is not None:
-                    gate = min(0.08 + 0.4 * (t - last[0]), 0.5)
-                    if abs(cx - last[1]) > gate and len(human_req.results()) > 1:
+                    if abs(cx - last[1]) > gate and (seed_x is not None or len(human_req.results()) > 1):
                         continue
                     score -= 1.5 * abs(cx - last[1])
                 candidates.append((score, cx, cy, float(r.confidence()), "human"))
@@ -206,13 +227,17 @@ def _detect_samples(video: Path, meta: dict, sample_hz: float, start: float | No
 # Track cleanup and cut confirmation
 
 
-def _clean_track(samples: list[Sample], duration: float) -> tuple[np.ndarray, np.ndarray]:
-    """Return (t_grid, subject_x) at SOLVE_HZ: outlier-filtered and gap-interpolated."""
+def _clean_track(samples: list[Sample], duration: float,
+                 fallback: float = 0.5) -> tuple[np.ndarray, np.ndarray]:
+    """Return (t_grid, subject_x) at SOLVE_HZ: outlier-filtered and gap-interpolated.
+
+    `fallback` is where the subject is assumed to be when nothing was detected at
+    all — the center of the frame, or the person the caller picked."""
     obs_t = np.array([s.t for s in samples if s.cx is not None])
     obs_x = np.array([s.cx for s in samples if s.cx is not None])
     t_grid = np.arange(0.0, duration, 1.0 / SOLVE_HZ)
     if len(obs_t) == 0:
-        return t_grid, np.full_like(t_grid, 0.5)
+        return t_grid, np.full_like(t_grid, fallback)
 
     # rolling median over the observed track kills single-sample detector jumps
     if len(obs_x) >= MEDIAN_WIN:
@@ -400,19 +425,27 @@ def framing_file_for(video: Path) -> Path:
 
 def compute_camera_path(video: Path, meta: dict, sample_hz: float = SAMPLE_HZ,
                         start: float | None = None, duration: float | None = None,
+                        subject_x: float | None = None,
                         ) -> tuple[np.ndarray, np.ndarray, list[float], float, list[Sample]]:
     """Detect the subject and solve the virtual camera for the whole video or a
     time window. Returns (t_grid, camera, cuts, crop_width_fraction, samples);
-    times are relative to `start`."""
+    times are relative to `start`.
+
+    `subject_x` follows the person at that normalized x instead of the biggest face
+    — the answer to more than one person being in the landscape frame."""
     span = duration if duration is not None else meta["duration"]
 
+    if subject_x is not None:
+        print(f"  following the person picked at x={subject_x:.3f}")
     cut_candidates = _scene_cut_candidates(video, start, duration)
-    samples = _detect_samples(video, meta, sample_hz, start, duration)
+    samples = _detect_samples(video, meta, sample_hz, start, duration, seed_x=subject_x)
     detected = sum(1 for s in samples if s.kind != "none")
     faces = sum(1 for s in samples if s.kind == "face")
     print(f"  detections: {detected}/{len(samples)} samples ({faces} face, {detected - faces} body)")
+    if subject_x is not None and detected == 0:
+        print("  nobody matched the pick — holding a still crop on it")
 
-    t_grid, subject = _clean_track(samples, span)
+    t_grid, subject = _clean_track(samples, span, fallback=subject_x if subject_x is not None else 0.5)
     cuts = _confirm_cuts(cut_candidates, t_grid, subject)
     if cut_candidates:
         detail = ", ".join(f"{c:.2f}s{'✓' if c in cuts else '✗'}" for c in cut_candidates)
