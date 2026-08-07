@@ -469,16 +469,28 @@ def framing_file_for(video: Path) -> Path:
 
 def _speaker_track(video: Path, frames: list[list[Face]], span: float, sample_hz: float,
                    start: float | None, duration: float | None, min_jump: float,
+                   cut_candidates: list[float],
                    ) -> tuple[np.ndarray, np.ndarray, list[float]]:
     """Turn per-frame faces into a subject path that steps between speakers.
 
-    Returns (t_grid, subject, cut_times) — the cuts are the turn boundaries, which the
-    solver then treats as segment boundaries, so the camera lands on the new speaker
-    instead of travelling to them. `min_jump` is how far the frame has to move for a
-    boundary to be worth cutting on at all."""
+    Returns (t_grid, subject, cut_times) — the cuts are the turn boundaries and the
+    source's own confirmed shot changes, which the solver treats as segment
+    boundaries, so the camera lands on the new framing instead of travelling to it.
+    `min_jump` is how far the frame has to move for a turn boundary to be worth
+    cutting on at all; a shot change is always a boundary, because the source already
+    cut there and re-seating the crop on the same frame is free."""
     t_grid = np.arange(0.0, span, 1.0 / SOLVE_HZ)
     n = len(frames)
-    tracks = speakers.build_tracks(frames, sample_hz)
+
+    # shot changes are confirmed against the whole face population, not the single
+    # subject track scene cuts are checked against elsewhere — a candidate that swaps
+    # the *other* people on stage is still a real camera change
+    shot_cuts = speakers.confirm_shot_cuts(frames, cut_candidates, sample_hz)
+    if cut_candidates:
+        detail = ", ".join(f"{c:.2f}s{'✓' if c in shot_cuts else '✗'}" for c in cut_candidates)
+        print(f"  shot changes: {len(shot_cuts)} confirmed of {len(cut_candidates)} scene candidates ({detail})")
+
+    tracks = speakers.build_tracks(frames, sample_hz, shot_cuts)
     if not tracks:
         print("  no faces to attribute speech to — holding the crop centered")
         return t_grid, np.full_like(t_grid, 0.5), []
@@ -486,19 +498,20 @@ def _speaker_track(video: Path, frames: list[list[Face]], span: float, sample_hz
     envelope = speakers.audio_envelope(video, start, duration, sample_hz, n)
     if envelope is None:
         print("  no audio on this clip — judging mouths alone, which is far less certain")
-    turns = speakers.speaker_timeline(tracks, envelope, n, sample_hz)
-    subject, cuts = speakers.subject_path(turns, tracks, t_grid, n, sample_hz, min_jump)
+    turns = speakers.speaker_timeline(tracks, envelope, n, sample_hz, shot_cuts)
+    subject, turn_cuts = speakers.subject_path(turns, tracks, t_grid, n, sample_hz, min_jump)
+    cuts = _merge_cuts(shot_cuts, turn_cuts)
 
     where = {tr.id: float(np.median(tr.cx)) for tr in tracks}
     print(f"  {len(tracks)} faces tracked ({', '.join(f'x={x:.2f}' for x in where.values())})")
-    if not cuts:
+    if not turn_cuts:
         print(f"  one speaker holds the frame throughout ({len(turns)} turns, none worth a cut)")
     else:
         table = " | ".join(
-            f"{turn.start:.1f}s{'✂' if turn.start in cuts else ' '}x={where[turn.track]:.2f}"
+            f"{turn.start:.1f}s{'✂' if turn.start in turn_cuts else ' '}x={where[turn.track]:.2f}"
             f" ({turn.score:.3f} vs {turn.rival:.3f})" for turn in turns
         )
-        print(f"  {len(turns)} speaker turns, {len(cuts)} of them a cut: {table}")
+        print(f"  {len(turns)} speaker turns, {len(turn_cuts)} of them a cut: {table}")
     return t_grid, subject, cuts
 
 
@@ -544,19 +557,19 @@ def compute_camera_path(video: Path, meta: dict, sample_hz: float = SAMPLE_HZ,
     # crop width as a fraction of source width (e.g. 0.316 for 16:9 -> 9:16)
     crop_w = OUT_ASPECT * meta["height"] / meta["width"]
 
-    speaker_cuts: list[float] = []
     if follow_speaker:
-        t_grid, subject, speaker_cuts = _speaker_track(video, frames, span, sample_hz,
-                                                       start, duration,
-                                                       min_jump=SPEAKER_CUT_JUMP * crop_w)
+        # scene candidates are confirmed inside, against the whole face population
+        t_grid, subject, cuts = _speaker_track(video, frames, span, sample_hz,
+                                               start, duration,
+                                               min_jump=SPEAKER_CUT_JUMP * crop_w,
+                                               cut_candidates=cut_candidates)
     else:
         t_grid, subject = _clean_track(samples, span,
                                        fallback=subject_x if subject_x is not None else 0.5)
-    scene_cuts = _confirm_cuts(cut_candidates, t_grid, subject)
-    cuts = _merge_cuts(scene_cuts, speaker_cuts)
-    if cut_candidates:
-        detail = ", ".join(f"{c:.2f}s{'✓' if c in scene_cuts else '✗'}" for c in cut_candidates)
-        print(f"  cuts: {len(scene_cuts)} confirmed of {len(cut_candidates)} scene-change candidates ({detail})")
+        cuts = _confirm_cuts(cut_candidates, t_grid, subject)
+        if cut_candidates:
+            detail = ", ".join(f"{c:.2f}s{'✓' if c in cuts else '✗'}" for c in cut_candidates)
+            print(f"  cuts: {len(cuts)} confirmed of {len(cut_candidates)} scene-change candidates ({detail})")
 
     camera = _solve_camera(t_grid, subject, cuts, crop_half=crop_w / 2)
 

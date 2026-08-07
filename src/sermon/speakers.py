@@ -27,6 +27,16 @@ Where each cut *lands* is decided separately from whether it happens: the scores
 switch is real, but their boundary is smeared by the measuring window, so the cut itself is
 placed on the incoming speaker's first observed mouth movement — on the breath before their
 line when there is one, and never before their face has been seen at all (`_refine_cut`).
+
+The source is often a switcher feed that changes camera angles mid-clip, and everything here
+is built to survive that. A scene-score spike is confirmed as a real shot change when the
+face *population* moves across it (`confirm_shot_cuts`) — the LED wall changing slides spikes
+the score without moving anybody. A confirmed shot change orphans every live track: position
+means nothing across a camera change, and a track that straddled one would register the
+reframe itself as mouth movement. A switch confirmed near a shot change cuts exactly on it,
+so the crop's jump hides inside the source's own. And when a shot change takes the current
+speaker off screen entirely — a reaction shot — the frame falls back to whoever is actually
+on camera instead of holding a position from the previous shot's geometry.
 """
 
 import subprocess
@@ -72,6 +82,17 @@ ONSET_FWD_SEC = 2.0  # ...but mostly leads it, by up to half a window and change
 ONSET_SPAN = 3  # consecutive samples of movement that count as "started talking"
 BREATH_BACK_SEC = 0.6  # a pause ending within this of the onset is the breath before
 # the line, and the cut belongs where speech resumes after it
+SHOT_WIN_SEC = 0.4  # the face population is compared over this much either side of a
+# scene-score spike to decide whether the camera actually changed
+SHOT_MATCH_RADIUS = 0.08  # a face this close to one from the other side is the same
+# person still in the same shot — a little wider than the tracker's own gate, because
+# a real shot change moves people much further than detector jitter does
+SHOT_BIRTH_SEC = 0.5  # a track starting within this of a shot change was born by it
+SHOT_SNAP_SEC = 1.5  # a switch confirmed this close to a shot change cuts exactly on
+# it: the crop's jump then hides inside the source's own cut, anywhere else the viewer
+# sees two cuts a beat apart
+PRESENCE_WIN_SEC = 1.0  # who counts as "on screen right now" when the frame's owner is
+# gone and nobody is visibly talking — a reaction shot has a subject too
 AUDIO_RATE = 16000  # the envelope only needs speech band, so 16 kHz mono is plenty
 SILENCE_FLOOR = 1e-4  # an envelope this weak at its loud percentile is digital silence,
 # and thresholding it would promote the noise floor to "speech"
@@ -168,18 +189,69 @@ def voiced_mask(envelope: np.ndarray | None, n_samples: int) -> np.ndarray:
 # Faces into people
 
 
-def build_tracks(frames: list[list[Face]], sample_hz: float) -> list[Track]:
+def _face_positions(xs: list[float]) -> list[float]:
+    """Cluster several samples' worth of face x's into the distinct people they show.
+
+    A cluster seen only once is detector flicker, not a person, and must not count
+    as somebody appearing or vanishing."""
+    groups: list[list[float]] = []
+    for x in sorted(xs):
+        if groups and x - groups[-1][-1] <= MATCH_RADIUS:
+            groups[-1].append(x)
+        else:
+            groups.append([x])
+    return [float(np.median(group)) for group in groups if len(group) >= 2]
+
+
+def confirm_shot_cuts(frames: list[list[Face]], candidates: list[float],
+                      sample_hz: float) -> list[float]:
+    """Which scene-score spikes are real camera changes, judged by the faces.
+
+    The LED wall changing slides spikes the scene score without moving anybody, which
+    is why raw candidates cannot be trusted (see ../track.py). But a genuine shot
+    change moves, adds or removes faces — so a candidate is confirmed when the face
+    population before it does not survive into the one after it. This sees the whole
+    frame where the single-subject confirmation in ../track.py sees only its own
+    track, so a cut that swaps the *other* people on stage is still caught."""
+    n = len(frames)
+    win = max(2, int(round(SHOT_WIN_SEC * sample_hz)))
+    confirmed = []
+    for c in candidates:
+        k = int(round(c * sample_hz))
+        before = _face_positions(
+            [f.cx for i in range(max(0, k - win), min(k, n)) for f in frames[i]])
+        after = _face_positions(
+            [f.cx for i in range(max(0, k), min(k + win, n)) for f in frames[i]])
+        appeared = any(all(abs(a - b) > SHOT_MATCH_RADIUS for b in before) for a in after)
+        vanished = any(all(abs(b - a) > SHOT_MATCH_RADIUS for a in after) for b in before)
+        if appeared or vanished:
+            confirmed.append(c)
+    return confirmed
+
+
+def build_tracks(frames: list[list[Face]], sample_hz: float,
+                 shot_cuts: list[float] | None = None) -> list[Track]:
     """Group per-frame faces into one track per person, by position.
 
     Greedy nearest-neighbour: the closest pairings inside `MATCH_RADIUS` win, unmatched
     faces open a track of their own. Enough for people sitting or standing on a stage,
-    which is the only footage that gets here."""
+    which is the only footage that gets here.
+
+    A shot change in `shot_cuts` orphans every live track: the same person re-enters
+    as a new track in the new shot's geometry. Position means nothing across a camera
+    change, and mouth aperture even less — a track that straddled the cut would
+    register the reframe itself as the mouth moving, planting a false "speaking"
+    spike exactly where a wrong camera decision hurts most."""
     tracks: list[Track] = []
     live: list[Track] = []
     next_id = 0
+    pending_cuts = sorted(shot_cuts or [])
 
     for index, faces in enumerate(frames):
         t = index / sample_hz
+        while pending_cuts and t >= pending_cuts[0]:
+            live = []
+            pending_cuts.pop(0)
         live = [tr for tr in live if t - tr.last_t <= TRACK_LOST_SEC]
         pairs = sorted(
             ((abs(f.cx - tr.last_cx), fi, ti) for fi, f in enumerate(faces)
@@ -239,7 +311,7 @@ def _positions(track: Track, n_samples: int, sample_hz: float) -> np.ndarray:
 
 def _refine_cut(track: Track, activity: np.ndarray, voiced: np.ndarray,
                 voiced_wide: np.ndarray, guess: float, floor: float,
-                sample_hz: float) -> float:
+                sample_hz: float, shot_cuts: list[float] | None = None) -> float:
     """Where the incoming speaker actually starts — the editor's cut point.
 
     `guess` is where the windowed scores first tipped, and since the window is centered,
@@ -249,7 +321,19 @@ def _refine_cut(track: Track, activity: np.ndarray, voiced: np.ndarray,
     pause ends just before that onset, on the moment speech resumes after the breath —
     the line then starts right on the new shot. And never before the incoming face has
     been seen at all: its position before that is extrapolation, and the source may
-    still be mid-transition to the shot that contains it."""
+    still be mid-transition to the shot that contains it.
+
+    One case overrides all of that: a switch happening because the *source* changed
+    shots. When the incoming track was born at a shot change close to the guess, the
+    cut goes exactly on the shot change — the crop's jump then hides inside the
+    source's own cut, where a human editor would put it too."""
+    born = track.t[0]
+    snaps = [c for c in (shot_cuts or [])
+             if abs(c - guess) <= SHOT_SNAP_SEC and 0.0 <= born - c <= SHOT_BIRTH_SEC
+             and c >= floor]
+    if snaps:
+        return min(snaps, key=lambda c: abs(c - guess))
+
     n = len(voiced)
     moving = np.nan_to_num(activity)
     lo = max(0, int(np.ceil(floor * sample_hz)),
@@ -267,13 +351,13 @@ def _refine_cut(track: Track, activity: np.ndarray, voiced: np.ndarray,
 
 
 def speaker_timeline(tracks: list[Track], envelope: np.ndarray | None, n_samples: int,
-                     sample_hz: float) -> list[Turn]:
+                     sample_hz: float, shot_cuts: list[float] | None = None) -> list[Turn]:
     """Split the clip into turns: which track owns the frame, from when to when.
 
     The scoring window is centered — this runs offline, so unlike a live operator it can
     see speech coming. The flip side is that the window's own boundaries lead the real
     ones, so each confirmed switch is then *placed* by `_refine_cut`, on the incoming
-    speaker's actual onset."""
+    speaker's actual onset (or exactly on the shot change that caused it)."""
     if not tracks:
         return []
     duration = n_samples / sample_hz
@@ -292,11 +376,28 @@ def speaker_timeline(tracks: list[Track], envelope: np.ndarray | None, n_samples
     # when each track was last actually observed, per sample — a dead track's owner
     # must not keep the frame on the strength of nobody outscoring a corpse
     last_seen: dict[int, np.ndarray] = {}
+    obs_cum: dict[int, np.ndarray] = {}
     for track in tracks:
         seen_at = np.full(n_samples, -np.inf)
         idx = np.clip(np.round(np.asarray(track.t) * sample_hz).astype(int), 0, n_samples - 1)
         seen_at[idx] = np.asarray(track.t)
         last_seen[track.id] = np.maximum.accumulate(seen_at)
+        seen = np.zeros(n_samples + 1)
+        seen[idx + 1] = 1.0
+        obs_cum[track.id] = np.cumsum(seen)
+
+    presence_win = max(1, int(round(PRESENCE_WIN_SEC * sample_hz)))
+
+    def most_present(i: int) -> int | None:
+        """The face most reliably on screen right now — the shot's subject, talking or
+        not. What the frame falls back to when its owner vanished and nobody is visibly
+        speaking: a reaction shot has a subject too, and holding a position carried
+        over from the previous shot's geometry frames nobody at all."""
+        lo = max(0, i + 1 - presence_win)
+        count, best_track = max(
+            (float(obs_cum[tr.id][i + 1] - obs_cum[tr.id][lo]), tr.id) for tr in tracks
+        )
+        return best_track if count >= MIN_VOICED_SAMPLES else None
 
     def window_scores(i: int) -> dict[int, float]:
         """Each face's mouth movement around sample `i`, counted only where somebody is
@@ -319,40 +420,59 @@ def speaker_timeline(tracks: list[Track], envelope: np.ndarray | None, n_samples
     turn_start, turn_score, turn_rival = 0.0, 0.0, 0.0
     challenger: int | None = None
     challenger_since = 0.0
+    ordered_cuts = sorted(shot_cuts or [])
+    last_shot_cut = -np.inf  # the most recent source camera change, tracked in-loop
+    cut_index = 0
 
     for i in range(n_samples):
         t = i / sample_hz
+        while cut_index < len(ordered_cuts) and ordered_cuts[cut_index] <= t:
+            last_shot_cut = ordered_cuts[cut_index]
+            cut_index += 1
         scores = window_scores(i)
-        if not scores:
-            continue
-        best_id, best = max(scores.items(), key=lambda item: item[1])
+        best_id: int | None = None
+        best = 0.0
+        if scores:
+            best_id, best = max(scores.items(), key=lambda item: item[1])
         if best < MIN_MOUTH_ACTIVITY:
-            challenger = None  # nobody's mouth is really moving: no evidence either way
-            continue
+            best_id, best = None, 0.0  # nobody's mouth is really moving
         if current is None:
-            current, turn_start, turn_score = best_id, 0.0, best
-            challenger = None
+            if best_id is not None:
+                current, turn_start, turn_score = best_id, 0.0, best
+                challenger = None
             continue
         held = scores.get(current, 0.0)
-        if best_id == current or best < ACTIVITY_MARGIN * held:
-            # either the frame is already on the moving mouth, or the challenger is not
-            # clearly ahead of it — and an unclear case is not worth a cut
-            challenger = None
-            continue
-        if challenger != best_id:
-            challenger, challenger_since = best_id, t
-            continue
         # a vanished owner (walked off, source changed shots) is not a speaker holding
         # their turn: their successor is confirmed fast and the minimum shot is waived
         owner_gone = t - float(last_seen[current][i]) > OWNER_LOST_SEC
+        # ...but only a shot change since they were last seen proves they are OUT, not
+        # just momentarily undetected — a head turned away must not hand the frame to
+        # a listener who happens to be detected more reliably
+        owner_out_of_shot = owner_gone and float(last_seen[current][i]) < last_shot_cut
+        if best_id is not None and best_id != current and best >= ACTIVITY_MARGIN * held:
+            contender = best_id  # someone else is clearly the one talking
+        elif best_id is None and owner_out_of_shot:
+            contender = most_present(i)  # nobody talks, owner gone: show who's there
+            if contender == current:
+                contender = None
+        else:
+            # the frame is already on the moving mouth, the challenger is not clearly
+            # ahead of it, or there is simply no evidence — none of it worth a cut
+            contender = None
+        if contender is None:
+            challenger = None
+            continue
+        if challenger != contender:
+            challenger, challenger_since = contender, t
+            continue
         confirm = LOST_CONFIRM_SEC if owner_gone else SWITCH_CONFIRM_SEC
         if t - challenger_since >= confirm and (owner_gone or t - turn_start >= MIN_DWELL_SEC):
             floor = turn_start + (LOST_CONFIRM_SEC if owner_gone else MIN_DWELL_SEC)
-            cut_at = _refine_cut(by_id[best_id], activity[best_id], voiced, voiced_wide,
-                                 challenger_since, floor, sample_hz)
+            cut_at = _refine_cut(by_id[contender], activity[contender], voiced, voiced_wide,
+                                 challenger_since, floor, sample_hz, shot_cuts)
             turns.append(Turn(turn_start, cut_at, current, turn_score, turn_rival))
-            current, turn_start, challenger = best_id, cut_at, None
-            turn_score, turn_rival = best, held
+            current, turn_start, challenger = contender, cut_at, None
+            turn_score, turn_rival = scores.get(contender, 0.0), held
 
     if current is not None:
         turns.append(Turn(turn_start, duration, current, turn_score, turn_rival))

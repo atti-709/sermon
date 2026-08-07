@@ -353,6 +353,25 @@ What keeps that from flickering:
   already is.
 - A hand-picked subject wins over speaker cutting: it is the more specific instruction.
 
+The source is often a **switcher feed that changes camera angles mid-clip**, and the analysis
+is built around that. A scene-score spike counts as a real shot change only when the face
+*population* moves across it — the LED wall changing slides spikes the score without moving
+anybody, and this check sees the whole frame where the single-subject check (used by the
+non-speaker modes) sees only its own track. A confirmed shot change then does three things:
+
+- **orphans every track** — position means nothing across a camera change, and a track that
+  straddled one would register the reframe itself as mouth movement, planting a false
+  "speaking" spike exactly where a wrong decision hurts most;
+- **becomes the cut point** for any switch confirmed near it: the crop's jump hides inside the
+  source's own cut, where a viewer sees one cut instead of two a beat apart — and it always
+  re-seats the crop, so even a same-speaker reframe lands as a clean step on the source's cut
+  rather than a pan right after it;
+- **frees the frame**: if it took the current speaker off screen entirely (a reaction shot),
+  the crop falls back to whoever is most reliably on camera, talking or not — holding a
+  position carried over from the previous shot's geometry frames nobody at all. This fallback
+  fires *only* when a shot change actually removed the owner; a speaker whose face is briefly
+  lost mid-shot keeps their frame.
+
 Also available from the CLI on an already-rendered clip: `uv run sermon track clip.mp4
 --follow-speaker`. Judging mouths costs a wider decode (1440 px) and the landmark detector,
 about 10 ms per sampled frame — a 6-minute stretch takes ~35 s.
