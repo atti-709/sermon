@@ -178,7 +178,11 @@ def run_export_vertical(args: argparse.Namespace) -> None:
     out = Path(args.out)
     hook = (args.hook_start, args.hook_end) if args.hook_start is not None and args.hook_end is not None else None
     opening = f" (opening with the {args.hook_end - args.hook_start:.0f}s hook)" if hook else ""
-    who = "the person you picked" if args.subject_x is not None else "the speaker"
+    who = "the speaker"
+    if args.subject_x is not None:
+        who = "the person you picked"
+    elif args.follow_speaker:
+        who = "whoever is talking"
     emit({"event": "progress", "percent": None, "stage": "tracking",
           "detail": f"tracking {who} in {args.start:.0f}s–{args.end:.0f}s{opening} (Apple Vision)…"})
     last = {"pct": -5.0}
@@ -191,7 +195,7 @@ def run_export_vertical(args: argparse.Namespace) -> None:
 
     with contextlib.redirect_stdout(_LineWriter(lambda line: emit({"event": "log", "line": line}))):
         export_vertical_clip(video, args.start, args.end, out, on_progress=on_progress, hook=hook,
-                             subject_x=args.subject_x)
+                             subject_x=args.subject_x, follow_speaker=args.follow_speaker)
     emit({"event": "result", "paths": {"vertical": str(out)}})
 
 
@@ -202,7 +206,7 @@ def run_track(args: argparse.Namespace) -> None:
     emit({"event": "progress", "percent": None, "stage": "track",
           "detail": f"tracking the speaker in {clip.name} (Apple Vision)…"})
     with contextlib.redirect_stdout(_LineWriter(lambda line: emit({"event": "log", "line": line}))):
-        paths = track_video(clip, copy_to_app=True)
+        paths = track_video(clip, copy_to_app=True, follow_speaker=args.follow_speaker)
     emit({"event": "result", "paths": {name: str(path) for name, path in paths.items()}})
 
 
@@ -243,6 +247,7 @@ def main() -> None:
 
     p = sub.add_parser("track")
     p.add_argument("--clip", required=True)
+    p.add_argument("--follow-speaker", action="store_true")
     p.set_defaults(func=run_track)
 
     p = sub.add_parser("export-vertical")
@@ -254,6 +259,8 @@ def main() -> None:
     p.add_argument("--hook-end", type=float, default=None)
     # normalized x of the person to follow, for a frame that holds more than one
     p.add_argument("--subject-x", type=float, default=None)
+    # ...or let the frame go to whoever is talking, cutting between them
+    p.add_argument("--follow-speaker", action="store_true")
     p.add_argument("--out", required=True)
     p.set_defaults(func=run_export_vertical)
 

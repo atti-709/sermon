@@ -27,8 +27,10 @@ const Segment: React.FC<{ src: string; fromSec: number }> = ({ src, fromSec }) =
  *  as long as the clip that would be exported — moving the out point grows or
  *  shrinks the preview with it.
  *
- *  With `onPickSubject` it also frames: the 9:16 window the export would cut is
- *  drawn over the picture, and clicking a person moves it onto them. */
+ *  With `onFraming` it also decides who the 9:16 crop belongs to when the frame
+ *  holds more than one person: the biggest face, one person clicked in the
+ *  picture (the window that would be cut is drawn as you aim), or whoever is
+ *  talking at the time. */
 export const SegmentPlayer: React.FC<{
   videoUrl: string;
   startSec: number;
@@ -41,8 +43,11 @@ export const SegmentPlayer: React.FC<{
   sourceAspect?: number | null;
   /** normalized x of the person the export follows, null when nobody was picked */
   subjectX?: number | null;
-  /** null = back to letting the tracker choose the largest face */
-  onPickSubject?: (x: number | null) => void;
+  /** the export cuts between speakers instead of following one person */
+  followSpeaker?: boolean;
+  /** the shape the highlights PATCH takes; the two modes are alternatives, so setting
+   *  one clears the other server-side */
+  onFraming?: (patch: { subject_x?: number | null; follow_speaker?: boolean }) => void;
 }> = ({
   videoUrl,
   startSec,
@@ -52,7 +57,8 @@ export const SegmentPlayer: React.FC<{
   onSetEnd,
   sourceAspect,
   subjectX,
-  onPickSubject,
+  followSpeaker,
+  onFraming,
 }) => {
   const ref = useRef<PlayerRef>(null);
   const stopFrame = useRef<number | null>(null);
@@ -103,6 +109,7 @@ export const SegmentPlayer: React.FC<{
 
   const shownX = picking ? hoverX ?? subjectX : subjectX;
   const center = shownX == null ? null : Math.min(Math.max(shownX, half), 1 - half);
+  const mode = followSpeaker ? "speaker" : subjectX != null ? "person" : "auto";
 
   const sourceXAt = (clientX: number, target: HTMLDivElement): number => {
     const rect = target.getBoundingClientRect();
@@ -124,14 +131,14 @@ export const SegmentPlayer: React.FC<{
           controls
           style={{ width: "100%" }}
         />
-        {onPickSubject && (center != null || picking) && (
+        {onFraming && (center != null || picking) && (
           <div
             className={`crop-guide${picking ? " picking" : ""}`}
             onMouseMove={(e) => picking && setHoverX(sourceXAt(e.clientX, e.currentTarget))}
             onMouseLeave={() => setHoverX(null)}
             onClick={(e) => {
               if (!picking) return;
-              onPickSubject(sourceXAt(e.clientX, e.currentTarget));
+              onFraming({ subject_x: sourceXAt(e.clientX, e.currentTarget) });
               setPicking(false);
               setHoverX(null);
             }}
@@ -178,30 +185,49 @@ export const SegmentPlayer: React.FC<{
           </button>
         )}
       </div>
-      {onPickSubject && (
-        <div className="row" style={{ gap: 8, marginTop: 8 }}>
-          <button
-            className={picking ? "sm primary" : "sm"}
-            aria-pressed={picking}
-            onClick={() => {
-              setPicking(!picking);
-              setHoverX(null);
-            }}
-          >
-            {picking ? "Cancel" : subjectX == null ? "Follow one person" : "Move the crop"}
-          </button>
-          {subjectX != null && !picking && (
-            <button className="sm" onClick={() => onPickSubject(null)}>
-              Clear
+      {onFraming && (
+        <div style={{ marginTop: 8 }}>
+          <div className="seg" role="group" aria-label="Who the vertical crop follows">
+            <button
+              className={mode === "auto" ? "sm primary" : "sm"}
+              aria-pressed={mode === "auto"}
+              onClick={() => {
+                setPicking(false);
+                onFraming({ subject_x: null, follow_speaker: false });
+              }}
+            >
+              Biggest face
             </button>
-          )}
-          <span className="hint" style={{ flex: 1, minWidth: 120, fontSize: 12 }}>
+            <button
+              className={mode === "person" || picking ? "sm primary" : "sm"}
+              aria-pressed={mode === "person"}
+              onClick={() => {
+                setHoverX(null);
+                setPicking(!picking);
+              }}
+            >
+              One person
+            </button>
+            <button
+              className={mode === "speaker" ? "sm primary" : "sm"}
+              aria-pressed={mode === "speaker"}
+              onClick={() => {
+                setPicking(false);
+                onFraming({ follow_speaker: true });
+              }}
+            >
+              Whoever speaks
+            </button>
+          </div>
+          <p className="hint" style={{ margin: "6px 0 0", fontSize: 12 }}>
             {picking
               ? "Click the person the crop should follow — Esc to cancel."
-              : subjectX == null
-                ? "Several people in frame? Pick whose face the 9:16 crop keeps."
-                : "The crop starts on the marked person and pans with them."}
-          </span>
+              : mode === "person"
+                ? "Locked to the marked person. Press One person again to move it."
+                : mode === "speaker"
+                  ? "Lip movement and the soundtrack decide who is talking; the crop cuts between them."
+                  : "Right for a single speaker. Two people in frame need one of the others."}
+          </p>
         </div>
       )}
     </div>

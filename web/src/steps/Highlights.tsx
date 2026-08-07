@@ -8,6 +8,9 @@ import { SegmentPlayer } from "../components/SegmentPlayer";
 const MIN_CLIP_SEC = 10;
 const MAX_CLIP_SEC = 200;
 
+/** who the 9:16 crop follows: the biggest face, one picked person, or whoever talks */
+type Framing = { subjectX: number | null; followSpeaker: boolean };
+
 /** HH:MM:SS, matching the timestamps the highlights file carries */
 const fmtClock = (sec: number): string => {
   const s = Math.max(0, Math.floor(sec));
@@ -17,16 +20,21 @@ const fmtClock = (sec: number): string => {
 
 /** Export range for one highlight: hook-first cuts the hook moment in front of the
  *  passage, otherwise the passage is widened to cover a hook that falls outside it.
- *  `subjectX` names who the crop follows when the frame holds more than one person. */
+ *  `framing` says who the crop follows when the frame holds more than one person. */
 const exportParams = (
   h: Highlight,
   rank: number,
   hookFirst: boolean,
   endSec: number,
-  subjectX: number | null,
+  framing: Framing,
 ) => {
   const hasHook = h.hook_start_sec != null && h.hook_end_sec != null;
-  const subject = subjectX == null ? {} : { subject_x: subjectX };
+  const subject =
+    framing.subjectX != null
+      ? { subject_x: framing.subjectX }
+      : framing.followSpeaker
+        ? { follow_speaker: true }
+        : {};
   if (hookFirst && hasHook) {
     return {
       start_sec: h.start_sec,
@@ -66,10 +74,13 @@ const HighlightCard: React.FC<{
   maxDuration,
   onExported,
 }) => {
-  // the out point and the person to follow are edited here and saved back into the
-  // highlights file, so the export, the Resolve XML and the notes all follow them
+  // the out point and the framing are edited here and saved back into the highlights
+  // file, so the export, the Resolve XML and the notes all follow them
   const [endSec, setEndSec] = useState(h.end_sec);
-  const [subjectX, setSubjectX] = useState<number | null>(h.subject_x ?? null);
+  const [framing, setFraming] = useState<Framing>({
+    subjectX: h.subject_x ?? null,
+    followSpeaker: h.follow_speaker === true,
+  });
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const saveTimer = useRef<number | null>(null);
 
@@ -92,12 +103,17 @@ const HighlightCard: React.FC<{
     }, 400);
   };
 
-  // one click, so it saves straight away rather than on a debounce like the slider
-  const changeSubject = (x: number | null) => {
-    setSubjectX(x);
+  // one click, so it saves straight away rather than on a debounce like the slider.
+  // The two modes are alternatives: the server drops whichever one is not being set,
+  // and the local state mirrors that so the buttons agree with what was saved.
+  const changeFraming = (patch: { subject_x?: number | null; follow_speaker?: boolean }) => {
+    setFraming({
+      subjectX: patch.subject_x ?? null,
+      followSpeaker: patch.subject_x == null && patch.follow_speaker === true,
+    });
     setSaveState("saving");
     api
-      .patchHighlight(projectId, rank, { subject_x: x })
+      .patchHighlight(projectId, rank, patch)
       .then(() => setSaveState("saved"))
       .catch(() => setSaveState("error"));
   };
@@ -117,8 +133,9 @@ const HighlightCard: React.FC<{
           hookEndSec={h.hook_end_sec}
           onSetEnd={changeEnd}
           sourceAspect={videoAspect}
-          subjectX={subjectX}
-          onPickSubject={changeSubject}
+          subjectX={framing.subjectX}
+          followSpeaker={framing.followSpeaker}
+          onFraming={changeFraming}
         />
       )}
       <div style={{ flex: 1, minWidth: 260 }}>
@@ -203,7 +220,7 @@ const HighlightCard: React.FC<{
           <JobRunner
             kind="export_vertical"
             projectId={projectId}
-            params={exportParams(h, rank, hookFirst, endSec, subjectX)}
+            params={exportParams(h, rank, hookFirst, endSec, framing)}
             label={h.vertical?.exists ? "Re-export vertical" : "Export vertical for DaVinci"}
             onDone={(done) => {
               if (done.state === "succeeded") onExported();
@@ -285,9 +302,10 @@ export const Highlights: React.FC<{
         candidates with a hook moment and a virality score. Preview a candidate, then{" "}
         <strong>Export vertical</strong>: the speaker gets tracked and the clip comes out as a
         1080×1920 file that opens with its hook, ready for your DaVinci edit — B-roll lands in the
-        final vertical frame. When several people share the frame — a panel, an interview — use{" "}
-        <strong>Follow one person</strong> under a preview to say whose face the crop keeps.
-        Each export gets a folder of its own next to the sermon —{" "}
+        final vertical frame. When several people share the frame — a panel, an interview — the
+        buttons under a preview say who the crop belongs to: <strong>One person</strong> you click,
+        or <strong>Whoever speaks</strong>, which reads lip movement against the soundtrack and
+        cuts between them. Each export gets a folder of its own next to the sermon —{" "}
         <code>01_Title/01_VERTICAL_NO_CAPTION/</code> — and the finished video lands in that
         folder's root at the end.
       </p>

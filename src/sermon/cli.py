@@ -68,6 +68,10 @@ def main(argv: list[str] | None = None) -> None:
     p_track.add_argument("video", type=Path, help="rendered clip from DaVinci")
     p_track.add_argument("--no-copy", action="store_true", help="don't copy the framing JSON into captions/public/")
     p_track.add_argument("--debug", action="store_true", help="also render a preview with the crop window burned in")
+    p_track.add_argument(
+        "--follow-speaker", action="store_true",
+        help="several people in frame: give it to whoever is talking, cutting between them",
+    )
 
     p_web = sub.add_parser("web", help="start the local web UI (guided pipeline in the browser)")
     p_web.add_argument("--port", type=int, default=8756, help="port to listen on (default: 8756)")
@@ -293,9 +297,11 @@ def _cmd_track(args: argparse.Namespace) -> None:
     if not video.exists():
         sys.exit(f"error: {video} does not exist")
 
-    print(f"Tracking the speaker in {video.name} (Apple Vision)…")
+    who = "whoever is talking" if args.follow_speaker else "the speaker"
+    print(f"Tracking {who} in {video.name} (Apple Vision)…")
     started = time.monotonic()
-    paths = track_video(video, copy_to_app=not args.no_copy, debug=args.debug)
+    paths = track_video(video, copy_to_app=not args.no_copy, debug=args.debug,
+                        follow_speaker=args.follow_speaker)
     print(f"Done in {time.monotonic() - started:.0f} s.")
     for name, path in paths.items():
         print(f"  {name}: {path}")

@@ -90,6 +90,9 @@ export type Highlight = {
   /** normalized x [0..1] of the person the vertical crop follows — set by hand when
    *  the frame holds several people; absent lets tracking pick the largest face */
   subject_x?: number | null;
+  /** give the frame to whoever is talking, cutting between them — the alternative to
+   *  `subject_x`, so at most one of the two is ever set */
+  follow_speaker?: boolean;
   /** server-augmented: the vertical tracked export for this highlight */
   vertical?: { index: number; path: string; exists: boolean };
   /** server-augmented: this highlight's own folder, `<dir>/01_<title>` */

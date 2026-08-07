@@ -26,14 +26,16 @@ from pathlib import Path
 
 import numpy as np
 
-from . import layout
+from . import layout, speakers
 from .captions import APP_PUBLIC_DIR
+from .speakers import Face
 
 # ---------------------------------------------------------------------------
 # Tunables (units: fraction of source width, seconds)
 SAMPLE_HZ = 10.0  # detection rate; the camera path is solved at SOLVE_HZ regardless
 SOLVE_HZ = 50.0  # fine enough that per-frame sampling of the path stays kink-free
 DETECT_WIDTH = 960  # frames are decoded at this width for detection
+LANDMARK_DETECT_WIDTH = 1440  # ...and this much when lip aperture has to be read off them
 OUT_ASPECT = 9 / 16  # the vertical crop
 DEAD_ZONE = 0.058  # subject may drift this far from the crop center before a pan (~110 px @1920)
 CONFIRM_SEC = 0.9  # subject must stay outside the dead zone this long to trigger a pan
@@ -60,6 +62,8 @@ TRACK_GATE_WIDEN = 0.4  # ...and the gate opens this fast (width/s) while the tr
 TRACK_GATE_MAX = 0.5  # up to here — a speaker who crossed the stage unseen is still theirs
 PICKED_GATE_MAX = 0.12  # with a subject picked by hand the leash stays short instead: people
 # on a panel sit ~0.2 width apart, and no blind stretch may let the track hop to the next one
+SPEAKER_CUT_JUMP = 0.4  # of the crop width: a new speaker nearer than this to the old one
+# is already in frame, so handing them the shot is not something to cut on
 KEYFRAME_EPSILON = 0.0008  # Douglas-Peucker tolerance on the emitted path
 # ---------------------------------------------------------------------------
 
@@ -111,9 +115,14 @@ def _scene_cut_candidates(video: Path, start: float | None = None,
     """Timestamps whose frame differs strongly from the previous one (possible hard cuts).
 
     With `start`/`duration` only that window is analyzed; timestamps come back
-    relative to `start` (ffmpeg resets pts when -ss precedes -i)."""
+    relative to `start` (ffmpeg resets pts when -ss precedes -i).
+
+    `-t` bounds the *input* here, not the output: `select` passes so few frames that an
+    output limit is only noticed when one finally arrives, so ffmpeg would decode past
+    the window to the next scene change anywhere in the sermon — and report it, for
+    `_confirm_cuts` to puzzle over a candidate outside the clip."""
     proc = subprocess.run(
-        ["ffmpeg", "-v", "error", *_seek_args(start), "-i", str(video), *_dur_args(duration),
+        ["ffmpeg", "-v", "error", *_seek_args(start), *_dur_args(duration), "-i", str(video),
          "-vf", f"scale=320:-2,select='gt(scene,{SCENE_THRESHOLD})',metadata=print:file=-",
          "-f", "null", "-"],
         check=True, capture_output=True, text=True,
@@ -125,17 +134,42 @@ def _scene_cut_candidates(video: Path, start: float | None = None,
     return cuts
 
 
+def _lip_aperture(observation) -> float | None:
+    """Vertical opening of the inner lips, as a fraction of the face's own box.
+
+    Vision gives landmark points normalized to the bounding box, so the number is already
+    comparable between a face near the camera and one across the stage — which is what
+    lets two people's mouths be scored against each other. None when Vision returned no
+    landmark constellation for this face."""
+    landmarks = observation.landmarks()
+    region = landmarks.innerLips() if landmarks is not None else None
+    count = region.pointCount() if region is not None else 0
+    if count < 2:
+        return None
+    # pyobjc hands back an objc.varlist for the C point array — it has to be sliced to
+    # pointCount(), because iterating it unbounded walks off the end of the buffer
+    ys = [float(point.y) for point in region.normalizedPoints()[0:count]]
+    return max(ys) - min(ys)
+
+
 def _detect_samples(video: Path, meta: dict, sample_hz: float, start: float | None = None,
-                    duration: float | None = None, seed_x: float | None = None) -> list[Sample]:
+                    duration: float | None = None, seed_x: float | None = None,
+                    landmarks: bool = False) -> tuple[list[Sample], list[list[Face]]]:
     """Decode frames at `sample_hz` and find the main subject with the Vision framework.
 
     `seed_x` names the person to follow (normalized [0..1]): the track starts there
-    instead of on the biggest face, and keeps a short leash for the rest of the clip."""
+    instead of on the biggest face, and keeps a short leash for the rest of the clip.
+
+    `landmarks` swaps the face detector for the landmark one and returns every face of
+    every frame with its mouth aperture, which is what ../speakers.py needs to work out
+    who is talking. It also decodes wider: the aperture is a few pixels of lip on a face
+    across the stage, and detail there is the whole signal. Off, nothing changes and the
+    second return value is empty."""
     import Quartz
     import Vision
 
     src_ar = meta["width"] / meta["height"]
-    w = DETECT_WIDTH
+    w = LANDMARK_DETECT_WIDTH if landmarks else DETECT_WIDTH
     h = int(round(w / src_ar / 2) * 2)
     frame_bytes = w * h * 3
 
@@ -148,6 +182,7 @@ def _detect_samples(video: Path, meta: dict, sample_hz: float, start: float | No
 
     color_space = Quartz.CGColorSpaceCreateDeviceRGB()
     samples: list[Sample] = []
+    frames: list[list[Face]] = []
     # (t, cx) of the last confident subject fix — a hand-picked subject is one already
     last: tuple[float, float] | None = None if seed_x is None else (0.0, seed_x)
     gate_max = TRACK_GATE_MAX if seed_x is None else PICKED_GATE_MAX
@@ -171,10 +206,15 @@ def _detect_samples(video: Path, meta: dict, sample_hz: float, start: float | No
             provider, None, False, Quartz.kCGRenderingIntentDefault,
         )
         handler = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(image, None)
-        face_req = Vision.VNDetectFaceRectanglesRequest.alloc().init()
-        face_req.setRevision_(Vision.VNDetectFaceRectanglesRequestRevision3)
+        if landmarks:
+            face_req = Vision.VNDetectFaceLandmarksRequest.alloc().init()
+            face_req.setRevision_(Vision.VNDetectFaceLandmarksRequestRevision3)
+        else:
+            face_req = Vision.VNDetectFaceRectanglesRequest.alloc().init()
+            face_req.setRevision_(Vision.VNDetectFaceRectanglesRequestRevision3)
         handler.performRequests_error_([face_req], None)
 
+        seen: list[Face] = []
         candidates = []  # (score, cx, cy, conf, kind)
         for r in face_req.results() or []:
             if r.confidence() < FACE_MIN_CONFIDENCE:
@@ -182,6 +222,8 @@ def _detect_samples(video: Path, meta: dict, sample_hz: float, start: float | No
             bb = r.boundingBox()  # normalized, origin bottom-left
             cx = bb.origin.x + bb.size.width / 2
             cy = 1.0 - (bb.origin.y + bb.size.height / 2)
+            if landmarks:
+                seen.append(Face(float(cx), float(cy), float(r.confidence()), _lip_aperture(r)))
             score = r.confidence() * np.sqrt(bb.size.height)
             if last is not None:
                 # favor the face nearest the running track, and drop the ones too far
@@ -218,9 +260,11 @@ def _detect_samples(video: Path, meta: dict, sample_hz: float, start: float | No
             last = (t, float(cx))
         else:
             samples.append(Sample(t, None, None, "none", 0.0))
+        if landmarks:
+            frames.append(seen)
 
     proc.wait()
-    return samples
+    return samples, frames
 
 
 # ---------------------------------------------------------------------------
@@ -423,51 +467,119 @@ def framing_file_for(video: Path) -> Path:
     return layout.sidecar(video, "framing.json")
 
 
+def _speaker_track(video: Path, frames: list[list[Face]], span: float, sample_hz: float,
+                   start: float | None, duration: float | None, min_jump: float,
+                   ) -> tuple[np.ndarray, np.ndarray, list[float]]:
+    """Turn per-frame faces into a subject path that steps between speakers.
+
+    Returns (t_grid, subject, cut_times) — the cuts are the turn boundaries, which the
+    solver then treats as segment boundaries, so the camera lands on the new speaker
+    instead of travelling to them. `min_jump` is how far the frame has to move for a
+    boundary to be worth cutting on at all."""
+    t_grid = np.arange(0.0, span, 1.0 / SOLVE_HZ)
+    n = len(frames)
+    tracks = speakers.build_tracks(frames, sample_hz)
+    if not tracks:
+        print("  no faces to attribute speech to — holding the crop centered")
+        return t_grid, np.full_like(t_grid, 0.5), []
+
+    envelope = speakers.audio_envelope(video, start, duration, sample_hz, n)
+    if envelope is None:
+        print("  no audio on this clip — judging mouths alone, which is far less certain")
+    turns = speakers.speaker_timeline(tracks, envelope, n, sample_hz)
+    subject, cuts = speakers.subject_path(turns, tracks, t_grid, n, sample_hz, min_jump)
+
+    where = {tr.id: float(np.median(tr.cx)) for tr in tracks}
+    print(f"  {len(tracks)} faces tracked ({', '.join(f'x={x:.2f}' for x in where.values())})")
+    if not cuts:
+        print(f"  one speaker holds the frame throughout ({len(turns)} turns, none worth a cut)")
+    else:
+        table = " | ".join(
+            f"{turn.start:.1f}s{'✂' if turn.start in cuts else ' '}x={where[turn.track]:.2f}"
+            f" ({turn.score:.3f} vs {turn.rival:.3f})" for turn in turns
+        )
+        print(f"  {len(turns)} speaker turns, {len(cuts)} of them a cut: {table}")
+    return t_grid, subject, cuts
+
+
+def _merge_cuts(*sources: list[float], min_gap: float = 0.25) -> list[float]:
+    """One sorted cut list, with cuts closer together than `min_gap` collapsed."""
+    merged: list[float] = []
+    for cut in sorted(c for source in sources for c in source):
+        if not merged or cut - merged[-1] > min_gap:
+            merged.append(cut)
+    return merged
+
+
 def compute_camera_path(video: Path, meta: dict, sample_hz: float = SAMPLE_HZ,
                         start: float | None = None, duration: float | None = None,
-                        subject_x: float | None = None,
+                        subject_x: float | None = None, follow_speaker: bool = False,
                         ) -> tuple[np.ndarray, np.ndarray, list[float], float, list[Sample]]:
     """Detect the subject and solve the virtual camera for the whole video or a
     time window. Returns (t_grid, camera, cuts, crop_width_fraction, samples);
     times are relative to `start`.
 
-    `subject_x` follows the person at that normalized x instead of the biggest face
-    — the answer to more than one person being in the landscape frame."""
+    Three ways to answer "who is the subject" when the landscape frame holds more than
+    one person. By default the biggest, most confident face is taken to be the speaker.
+    `subject_x` follows the person at that normalized x instead, whatever they do.
+    `follow_speaker` gives the frame to whoever is talking (see ../speakers.py) and
+    **cuts** between them — a pan across the stage is not a shot anyone would make.
+    A hand-picked subject wins over both: it is the more specific instruction."""
     span = duration if duration is not None else meta["duration"]
+    if subject_x is not None and follow_speaker:
+        print("  a person was picked by hand, so speaker cutting is off for this clip")
+        follow_speaker = False
 
     if subject_x is not None:
         print(f"  following the person picked at x={subject_x:.3f}")
     cut_candidates = _scene_cut_candidates(video, start, duration)
-    samples = _detect_samples(video, meta, sample_hz, start, duration, seed_x=subject_x)
+    samples, frames = _detect_samples(video, meta, sample_hz, start, duration,
+                                      seed_x=subject_x, landmarks=follow_speaker)
     detected = sum(1 for s in samples if s.kind != "none")
     faces = sum(1 for s in samples if s.kind == "face")
     print(f"  detections: {detected}/{len(samples)} samples ({faces} face, {detected - faces} body)")
     if subject_x is not None and detected == 0:
         print("  nobody matched the pick — holding a still crop on it")
 
-    t_grid, subject = _clean_track(samples, span, fallback=subject_x if subject_x is not None else 0.5)
-    cuts = _confirm_cuts(cut_candidates, t_grid, subject)
-    if cut_candidates:
-        detail = ", ".join(f"{c:.2f}s{'✓' if c in cuts else '✗'}" for c in cut_candidates)
-        print(f"  cuts: {len(cuts)} confirmed of {len(cut_candidates)} scene-change candidates ({detail})")
-
     # crop width as a fraction of source width (e.g. 0.316 for 16:9 -> 9:16)
     crop_w = OUT_ASPECT * meta["height"] / meta["width"]
+
+    speaker_cuts: list[float] = []
+    if follow_speaker:
+        t_grid, subject, speaker_cuts = _speaker_track(video, frames, span, sample_hz,
+                                                       start, duration,
+                                                       min_jump=SPEAKER_CUT_JUMP * crop_w)
+    else:
+        t_grid, subject = _clean_track(samples, span,
+                                       fallback=subject_x if subject_x is not None else 0.5)
+    scene_cuts = _confirm_cuts(cut_candidates, t_grid, subject)
+    cuts = _merge_cuts(scene_cuts, speaker_cuts)
+    if cut_candidates:
+        detail = ", ".join(f"{c:.2f}s{'✓' if c in scene_cuts else '✗'}" for c in cut_candidates)
+        print(f"  cuts: {len(scene_cuts)} confirmed of {len(cut_candidates)} scene-change candidates ({detail})")
+
     camera = _solve_camera(t_grid, subject, cuts, crop_half=crop_w / 2)
 
+    # a cut is a step, not a move: counting it as speed would report a camera that
+    # never existed (and drown the pan speed the number is there to show)
     vel = np.abs(np.diff(camera)) * SOLVE_HZ
+    for cut in cuts:
+        i = int(np.searchsorted(t_grid, cut))
+        vel[max(0, i - 1):i + 1] = 0.0
     moving = float(np.mean(vel > 0.002))
-    print(f"  camera: still {100 * (1 - moving):.0f}% of the time, peak speed {vel.max():.3f} width/s")
+    print(f"  camera: still {100 * (1 - moving):.0f}% of the time, peak pan {vel.max():.3f} width/s"
+          + (f", {len(cuts)} cut{'s' if len(cuts) != 1 else ''}" if cuts else ""))
 
     return t_grid, camera, cuts, crop_w, samples
 
 
 def track_video(video: Path, sample_hz: float = SAMPLE_HZ, copy_to_app: bool = True,
-                debug: bool = False) -> dict[str, Path]:
+                debug: bool = False, follow_speaker: bool = False) -> dict[str, Path]:
     meta = probe_video(video)
     duration = meta["duration"]
 
-    t_grid, camera, cuts, crop_w, samples = compute_camera_path(video, meta, sample_hz)
+    t_grid, camera, cuts, crop_w, samples = compute_camera_path(
+        video, meta, sample_hz, follow_speaker=follow_speaker)
     keyframes = _thin_keyframes(t_grid, camera, cuts)
     print(f"  emitted {len(keyframes)} keyframes")
 

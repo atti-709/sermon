@@ -54,7 +54,7 @@ export const api = {
   patchHighlight: (
     id: string,
     index: number,
-    patch: { end_sec?: number; subject_x?: number | null },
+    patch: { end_sec?: number; subject_x?: number | null; follow_speaker?: boolean },
   ) =>
     request<Highlight>(`/api/projects/${id}/highlights/${index}`, {
       method: "PATCH",

@@ -202,14 +202,17 @@ def get_highlights(project_id: str) -> dict:
 
 
 class HighlightPatchRequest(BaseModel):
-    """What the UI may edit on one highlight. An omitted field is left alone; the
-    two are separate PATCHes in practice, not one form."""
+    """What the UI may edit on one highlight. An omitted field is left alone; these
+    are separate PATCHes in practice, not one form."""
 
     end_sec: float | None = None
     # normalized x [0..1] of the person the vertical crop should follow, for footage
     # with several people in frame (see ../track.py). An explicit null clears the
     # pick and tracking goes back to choosing the largest face itself.
     subject_x: float | None = Field(None, ge=0.0, le=1.0)
+    # give the frame to whoever is talking instead, cutting between them (../speakers.py).
+    # The alternative to subject_x, so setting either one clears the other.
+    follow_speaker: bool | None = None
 
 
 MIN_HIGHLIGHT_SEC = 5.0
@@ -260,11 +263,19 @@ def update_highlight(project_id: str, index: int, req: HighlightPatchRequest) ->
                 if s["start"] >= highlight["start_sec"] - 0.5 and s["end"] <= end + 0.5
             )
 
+    # the two framing modes are alternatives, so whichever is set turns the other off
     if "subject_x" in sent:
         if req.subject_x is None:
             highlight.pop("subject_x", None)
         else:
             highlight["subject_x"] = round(float(req.subject_x), 5)
+            highlight.pop("follow_speaker", None)
+    if "follow_speaker" in sent:
+        if req.follow_speaker:
+            highlight["follow_speaker"] = True
+            highlight.pop("subject_x", None)
+        else:
+            highlight.pop("follow_speaker", None)
 
     write_highlights(
         items,
@@ -502,7 +513,8 @@ def _build_job(req: JobRequest) -> JobSpec:
         hook_start, hook_end = p.get("hook_start_sec"), p.get("hook_end_sec")
         if hook_start is not None and hook_end is not None:
             argv += ["--hook-start", str(float(hook_start)), "--hook-end", str(float(hook_end))]
-        # optional: follow the person picked in the preview rather than the largest face
+        # optional: follow the person picked in the preview rather than the largest face,
+        # or hand the frame to whoever is talking and cut between them
         if p.get("subject_x") is not None:
             try:
                 subject_x = float(p["subject_x"])
@@ -511,6 +523,8 @@ def _build_job(req: JobRequest) -> JobSpec:
             if not 0.0 <= subject_x <= 1.0:
                 raise HTTPException(422, "subject_x must be a number between 0 and 1")
             argv += ["--subject-x", f"{subject_x:.5f}"]
+        elif p.get("follow_speaker"):
+            argv.append("--follow-speaker")
         return JobSpec(argv, repo_cwd, {"paths": {"vertical": str(out)}}, outputs=[out])
 
     if req.kind in ("captions", "track"):

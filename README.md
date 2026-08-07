@@ -302,17 +302,49 @@ Either way the camera behaves the same:
   instead of gliding. LED-wall slide changes behind the speaker are ignored.
 - No faces at all → the crop stays centered, same as before tracking existed.
 
-**More than one person in frame** (a panel, an interview) breaks the "biggest face is the
-speaker" guess: four people side by side score alike, so the camera locks onto whoever the
-detector happened to like in the first frame and stays there while the others talk off-screen.
-Nothing detects who is *speaking*, so the choice is yours to make: press **Follow one person**
-under a highlight's preview on the Highlights step and click them. The 9:16 window the export
-would cut is drawn over the picture as you aim, and the pick is saved into the highlights file
-as `subject_x` (normalized x), so re-exports and the notes keep it.
+### More than one person in frame
 
-The pick then seeds the track and keeps it on a short leash — a detection more than ~0.12 of
-the frame width from the running track is treated as a different person, even when it is the
-only face on screen, which is what stops the track from hopping to the neighbour during a
-blind stretch. Both segments of a hook-first export share the one pick (they are tracked
-separately, so otherwise each could lock onto a different panelist). A click within ~0.08 of a
-real face snaps to it; a pick nobody matches holds a still crop right there.
+A panel or an interview breaks the "biggest face is the speaker" guess: people side by side
+score alike, so the camera locks onto whoever the detector happened to like in the first frame
+and stays there while the others talk off-screen. Three buttons under a highlight's preview on
+the Highlights step say who the crop belongs to, and the answer is saved into the highlights
+file, so re-exports, the Resolve XML and the notes all follow it.
+
+**Biggest face** is the default and the whole of the old behaviour.
+
+**One person** — click them in the preview. The 9:16 window the export would cut is drawn over
+the picture as you aim (`subject_x`, normalized x). The pick seeds the track and keeps it on a
+short leash: a detection more than ~0.12 of the frame width from the running track is a
+different person, even when it is the only face on screen, which is what stops the track
+hopping to the neighbour during a blind stretch. A click within ~0.08 of a real face snaps to
+it; a pick nobody matches holds a still crop right there. Both segments of a hook-first export
+share the one pick — tracked separately, they could otherwise each lock onto a different
+panelist.
+
+**Whoever speaks** (`follow_speaker`) works out who is talking and **cuts** between them — see
+`src/sermon/speakers.py`. Vision's face landmarks give each mouth's inner-lip aperture as a
+fraction of its own face box, so two people's mouths are comparable however far away they sit;
+how much that aperture moves over a window is how much the mouth is moving. A band-passed RMS
+envelope of the soundtrack says when anybody is speaking, and **mouth movement is only counted
+on voiced samples** — that condition is the entire audio-visual correlation in one line, since a
+listener who nods, smiles or laughs in a pause contributes nothing. On real two-hander footage
+the talker measures ~10× the listener (0.03 against 0.003).
+
+Turns become hard cuts, never pans — travelling two metres across a stage is the shot no
+operator would make — and the existing cut machinery does the rest: a cut is already a segment
+boundary the solver starts afresh at, so the camera lands on the new speaker in a single frame.
+What keeps that from flickering:
+
+- A challenger must beat **the current speaker** by 2.2× for 0.9 s before the frame changes
+  hands, and no shot is shorter than 2 s. Interjections and back-channel "mhm"s come to nothing.
+- The window is **centered**, not trailing: offline there is no reason to cut late the way a
+  live operator must, so the cut lands where the new speaker started talking.
+- A turn only becomes a cut if the frame actually has to **move** ~0.4 of a crop width. A face
+  lost for a moment (head turned away, hand over the mouth) comes back as a fresh track, and
+  handing the shot from one fragment of a person to the next must not cut to where the camera
+  already is.
+- A hand-picked subject wins over speaker cutting: it is the more specific instruction.
+
+Also available from the CLI on an already-rendered clip: `uv run sermon track clip.mp4
+--follow-speaker`. Judging mouths costs a wider decode (1440 px) and the landmark detector,
+about 10 ms per sampled frame — a 6-minute stretch takes ~35 s.
