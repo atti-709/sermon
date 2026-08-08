@@ -301,15 +301,25 @@ export const CaptionedClipCore: React.FC<{
     };
   }, [editable, captureClicksForStudio]);
 
-  const saveCorrection = (fromMs: number, corrected: string) => {
+  const saveCorrection = (fromMs: number, corrected: string, allowDelete: boolean) => {
     setEditing(null);
-    if (!captions || corrected.trim() === "") return;
+    if (!captions) return;
     const index = captions.findIndex((c) => c.startMs === fromMs);
-    if (index === -1 || corrected.trim() === captions[index].text.trim()) return;
-    const leadingSpace = captions[index].text.startsWith(" ") ? " " : "";
-    const updated = captions.map((c, i) =>
-      i === index ? { ...c, text: leadingSpace + corrected.trim() } : c,
-    );
+    if (index === -1) return;
+    let updated: Caption[];
+    if (corrected.trim() === "") {
+      // clear + Enter deletes an extra word the transcriber invented; the other
+      // words keep their timings. A blur with an emptied field cancels instead:
+      // there is no way to re-add a word, so deletion must be deliberate.
+      if (!allowDelete) return;
+      updated = captions.filter((_, i) => i !== index);
+    } else {
+      if (corrected.trim() === captions[index].text.trim()) return;
+      const leadingSpace = captions[index].text.startsWith(" ") ? " " : "";
+      updated = captions.map((c, i) =>
+        i === index ? { ...c, text: leadingSpace + corrected.trim() } : c,
+      );
+    }
     setEdited({ src: videoSrc, captions: updated });
     onSaveCorrections?.(updated);
   };
@@ -382,12 +392,16 @@ export const CaptionedClipCore: React.FC<{
                           onKeyDown={(e) => {
                             e.stopPropagation();
                             if (e.key === "Enter") {
-                              saveCorrection(token.fromMs, (e.target as HTMLInputElement).value);
+                              saveCorrection(
+                                token.fromMs,
+                                (e.target as HTMLInputElement).value,
+                                true,
+                              );
                             } else if (e.key === "Escape") {
                               setEditing(null);
                             }
                           }}
-                          onBlur={(e) => saveCorrection(token.fromMs, e.target.value)}
+                          onBlur={(e) => saveCorrection(token.fromMs, e.target.value, false)}
                           style={{
                             fontFamily: "inherit",
                             fontWeight: "inherit",

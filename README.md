@@ -80,7 +80,9 @@ file it was producing.
 
 The preview step embeds the exact Remotion composition the final render uses
 (`captions/src/CaptionedClipCore.tsx`, shared with Remotion Studio) — click a caption
-word to fix a typo; edits land in the same `.captions.json` Studio and the render read.
+word to fix a typo, or clear it and press Enter to delete an extra word the transcriber
+invented (the surrounding words keep their timings); edits land in the same
+`.captions.json` Studio and the render read.
 
 ## Where files go
 

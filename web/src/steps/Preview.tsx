@@ -33,9 +33,11 @@ const activeCaptionIndex = (captions: Caption[], tMs: number): number => {
 };
 
 /** Full transcript with every word editable — click a word to fix it (the
- *  player seeks along), Enter saves, Esc cancels. Memoized on the active word
- *  rather than the playhead: re-reconciling every word span 30x a second is
- *  enough main-thread work to stutter playback. */
+ *  player seeks along), Enter saves, Esc cancels; clearing a word + Enter
+ *  deletes it (an extra word from the transcriber), the neighbours keep their
+ *  timings. Memoized on the active word rather than the playhead:
+ *  re-reconciling every word span 30x a second is enough main-thread work to
+ *  stutter playback. */
 const CaptionEditor = memo(function CaptionEditor({
   captions,
   activeIndex,
@@ -49,10 +51,16 @@ const CaptionEditor = memo(function CaptionEditor({
 }) {
   const [editing, setEditing] = useState<number | null>(null);
 
-  const commit = (index: number, value: string) => {
+  const commit = (index: number, value: string, allowDelete: boolean) => {
     setEditing(null);
     const trimmed = value.trim();
-    if (!trimmed || trimmed === captions[index].text.trim()) return;
+    if (!trimmed) {
+      // deletion must be the deliberate gesture (clear + Enter): a blur with an
+      // emptied field cancels instead, since there is no way to re-add a word
+      if (allowDelete) onSave(captions.filter((_, i) => i !== index));
+      return;
+    }
+    if (trimmed === captions[index].text.trim()) return;
     const leadingSpace = captions[index].text.startsWith(" ") ? " " : "";
     onSave(captions.map((c, i) => (i === index ? { ...c, text: leadingSpace + trimmed } : c)));
   };
@@ -68,10 +76,10 @@ const CaptionEditor = memo(function CaptionEditor({
               defaultValue={caption.text.trim()}
               style={{ width: `${Math.max(caption.text.trim().length + 2, 5)}ch` }}
               onKeyDown={(e) => {
-                if (e.key === "Enter") commit(index, (e.target as HTMLInputElement).value);
+                if (e.key === "Enter") commit(index, (e.target as HTMLInputElement).value, true);
                 else if (e.key === "Escape") setEditing(null);
               }}
-              onBlur={(e) => commit(index, e.target.value)}
+              onBlur={(e) => commit(index, e.target.value, false)}
             />
           );
         }
@@ -232,8 +240,9 @@ export const Preview: React.FC<{
       <h2>Preview & Edit</h2>
       <p className="hint">
         This is the exact composition the final render uses. <strong>Click any word in the
-        transcript</strong> to fix it — the player follows along; Enter saves, Esc cancels. Words in
-        the video itself are clickable too.
+        transcript</strong> to fix it — the player follows along; Enter saves, Esc cancels. Clear a
+        word and press Enter to delete it — the other words keep their timings. Words in the video
+        itself are clickable too.
       </p>
       <div className="row" style={{ alignItems: "flex-start", marginTop: 20, gap: 24 }}>
         <div style={{ width: 330, flexShrink: 0 }}>
