@@ -10,6 +10,10 @@ Transcribe Slovak sermon videos locally and pick social-media highlight moments 
   **virality score** (1–100, a hook-weighted composite of hook/flow/value/reach sub-scores,
   OpusClip-style) for fast triage. Shorter is better: the prompt targets 30–90 s and
   hard-caps at 110 s. You fine-tune the exact cut points yourself.
+- **Carousels** turn the same transcript into Instagram carousel posts: you choose how many
+  carousels and how many frames each, Gemini writes the slide texts (cover line, one thought
+  per frame, closing takeaway) plus a caption and hashtags, ready to paste into the design
+  template. Saved as `.carousels.json`/`.carousels.md` in `00_SOURCE/`.
 - **Vertical export** cuts each highlight *before* the edit: the speaker is tracked with the
   Apple Vision framework and the 9:16 crop follows them, so DaVinci receives a 1080×1920
   ProRes and your B-roll, titles and trims land in the final vertical frame. This lives on

@@ -184,6 +184,8 @@ def artifact_paths(video: Path) -> dict[str, Path]:
         "segments": layout.source_file(video, "segments.json"),
         "highlights": layout.source_file(video, "highlights.json"),
         "highlights_md": layout.source_file(video, "highlights.md"),
+        "carousels": layout.source_file(video, "carousels.json"),
+        "carousels_md": layout.source_file(video, "carousels.md"),
         "resolve_xml": layout.source_file(video, "resolve.xml"),
     }
 
@@ -290,6 +292,7 @@ def derive_state(video: Path, probe: bool = True) -> dict:
     steps = {
         "transcribe": "done" if arts["segments"].is_file() else "pending",
         "highlights": "done" if arts["highlights"].is_file() else "pending",
+        "carousels": "done" if arts["carousels"].is_file() else "pending",
         "export": "done" if arts["resolve_xml"].is_file() else "pending",
         "clips": "done" if clips else "pending",
         "captions": "done" if any(c["has_captions"] for c in clips) else "pending",

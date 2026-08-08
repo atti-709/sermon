@@ -49,7 +49,17 @@ export type ProjectState = {
     height?: number | null;
     fps?: number | null;
   };
-  artifacts: Record<"transcript" | "srt" | "segments" | "highlights" | "highlights_md" | "resolve_xml", Artifact>;
+  artifacts: Record<
+    | "transcript"
+    | "srt"
+    | "segments"
+    | "highlights"
+    | "highlights_md"
+    | "carousels"
+    | "carousels_md"
+    | "resolve_xml",
+    Artifact
+  >;
   /** 00_SOURCE: everything derived from the sermon as a whole */
   source_dir: string;
   /** an explicit folder for finished renders; null = each one in its own highlight folder */
@@ -57,7 +67,10 @@ export type ProjectState = {
   /** names off `_SPEAKERS.txt` in the sermon folder; the first pre-fills each clip's intro */
   speakers?: string[];
   clips: ClipState[];
-  steps: Record<"transcribe" | "highlights" | "export" | "clips" | "captions" | "render", StepStatus>;
+  steps: Record<
+    "transcribe" | "highlights" | "carousels" | "export" | "clips" | "captions" | "render",
+    StepStatus
+  >;
 };
 
 export type Segment = { start: number; end: number; text: string };
@@ -104,6 +117,26 @@ export type Highlight = {
 };
 export type HighlightsFile = { video: string; gemini_model: string; highlights: Highlight[] };
 
+/** one suggested Instagram carousel: slide texts to lay onto the brand template */
+export type Carousel = {
+  title: string;
+  source_start: string;
+  source_end: string;
+  source_start_sec: number;
+  source_end_sec: number;
+  slides: string[];
+  caption: string;
+  hashtags: string[];
+  save_score: number;
+  score_reason: string;
+};
+export type CarouselsFile = {
+  video: string;
+  gemini_model: string;
+  frames_per_carousel: number;
+  carousels: Carousel[];
+};
+
 export type Caption = {
   text: string;
   startMs: number;
@@ -134,6 +167,7 @@ export type JobKind =
   | "convert"
   | "transcribe"
   | "highlights"
+  | "carousels"
   | "export_vertical"
   | "captions"
   | "track"

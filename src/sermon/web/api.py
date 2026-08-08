@@ -201,6 +201,15 @@ def get_highlights(project_id: str) -> dict:
     return data
 
 
+@router.get("/projects/{project_id}/carousels")
+def get_carousels(project_id: str) -> dict:
+    video = _project_video(project_id)
+    carousels = projects.artifact_paths(video)["carousels"]
+    if not carousels.is_file():
+        raise HTTPException(404, "no carousels yet")
+    return json.loads(carousels.read_text(encoding="utf-8"))
+
+
 class HighlightPatchRequest(BaseModel):
     """What the UI may edit on one highlight. An omitted field is left alone; these
     are separate PATCHes in practice, not one form."""
@@ -490,6 +499,20 @@ def _build_job(req: JobRequest) -> JobSpec:
             "--count", str(p.get("count", 8)),
             "--min-duration", str(p.get("min_duration", 20)),
             "--max-duration", str(p.get("max_duration", 100)),
+            "--gemini-model", p.get("gemini_model", "gemini-flash-latest"),
+        )
+        return JobSpec(argv, repo_cwd)
+
+    if req.kind == "carousels":
+        _require_gemini_key()
+        video = _project_video(req.project_id)
+        segments = projects.artifact_paths(video)["segments"]
+        if not segments.is_file():
+            raise HTTPException(422, "not transcribed yet — run the transcribe step first")
+        argv = worker_argv(
+            "carousels", "--segments", str(segments),
+            "--count", str(p.get("count", 6)),
+            "--frames", str(p.get("frames", 8)),
             "--gemini-model", p.get("gemini_model", "gemini-flash-latest"),
         )
         return JobSpec(argv, repo_cwd)

@@ -1,6 +1,7 @@
 import type {
   Caption,
   CaptionStyle,
+  CarouselsFile,
   ClipState,
   CorrectionsFile,
   Framing,
@@ -49,6 +50,7 @@ export const api = {
   getProject: (id: string) => request<ProjectState>(`/api/projects/${id}`),
   transcript: (id: string) => request<SegmentsFile>(`/api/projects/${id}/transcript`),
   highlights: (id: string) => request<HighlightsFile>(`/api/projects/${id}/highlights`),
+  carousels: (id: string) => request<CarouselsFile>(`/api/projects/${id}/carousels`),
   /** edit one highlight (1-based rank) — rewrites the highlights file, so the export,
    *  the Resolve XML and the notes all follow. `subject_x: null` clears the pick. */
   patchHighlight: (

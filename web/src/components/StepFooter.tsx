@@ -6,6 +6,7 @@ const TO_CONTINUE: Record<StepKey, string> = {
   video: "",
   transcribe: "Choose a video to continue.",
   highlights: "Transcribe the sermon to continue.",
+  carousels: "Transcribe the sermon to continue.",
   export: "Find highlights to continue.",
   captions: "Register a rendered clip to continue.",
   preview: "Generate captions for this clip to continue.",

@@ -10,6 +10,8 @@ const doneMark = (project: ProjectState | null, key: StepKey): boolean => {
       return project.steps.transcribe === "done";
     case "highlights":
       return project.steps.highlights === "done";
+    case "carousels":
+      return project.steps.carousels === "done";
     case "export":
       return project.steps.export === "done" && project.clips.length > 0;
     case "captions":

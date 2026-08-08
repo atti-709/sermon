@@ -127,6 +127,38 @@ def run_highlights(args: argparse.Namespace) -> None:
           "paths": {name: str(path) for name, path in paths.items()}})
 
 
+def run_carousels(args: argparse.Namespace) -> None:
+    from ..carousels import select_carousels, write_carousels
+
+    segments_path = Path(args.segments)
+    data = json.loads(segments_path.read_text(encoding="utf-8"))
+    segments = data["segments"]
+    if not segments:
+        raise RuntimeError(f"{segments_path.name} contains no segments")
+
+    emit({"event": "progress", "percent": None, "stage": "gemini",
+          "detail": f"asking {args.gemini_model} for {args.count} carousels of {args.frames} frames…"})
+    carousels = select_carousels(
+        segments,
+        count=args.count,
+        frames=args.frames,
+        gemini_model=args.gemini_model,
+    )
+    stem = segments_path.name.removesuffix(".segments.json")
+    paths = write_carousels(
+        carousels,
+        video_name=data.get("video", stem),
+        stem=stem,
+        out_dir=segments_path.parent,
+        gemini_model=args.gemini_model,
+        frames=args.frames,
+    )
+    for i, c in enumerate(carousels, 1):
+        emit({"event": "log", "line": f"{i}. ({c['save_score']}) {c['title']} — {len(c['slides'])} frames"})
+    emit({"event": "result", "count": len(carousels),
+          "paths": {name: str(path) for name, path in paths.items()}})
+
+
 def run_captions(args: argparse.Namespace) -> None:
     from .. import layout
     from ..captions import generate_captions, proofread_captions, write_captions
@@ -236,6 +268,13 @@ def main() -> None:
     p.add_argument("--max-duration", type=int, default=100)
     p.add_argument("--gemini-model", default="gemini-flash-latest")
     p.set_defaults(func=run_highlights)
+
+    p = sub.add_parser("carousels")
+    p.add_argument("--segments", required=True)
+    p.add_argument("--count", type=int, default=6)
+    p.add_argument("--frames", type=int, default=8)
+    p.add_argument("--gemini-model", default="gemini-flash-latest")
+    p.set_defaults(func=run_carousels)
 
     p = sub.add_parser("captions")
     p.add_argument("--clip", required=True)

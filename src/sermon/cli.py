@@ -44,6 +44,16 @@ def main(argv: list[str] | None = None) -> None:
     p_highlights.add_argument("input", type=Path, help="video file (finds its .segments.json) or a .segments.json directly")
     _add_highlight_args(p_highlights)
 
+    p_carousels = sub.add_parser("carousels", help="suggest Instagram carousel texts from an existing transcript with Gemini")
+    p_carousels.add_argument("input", type=Path, help="video file (finds its .segments.json) or a .segments.json directly")
+    p_carousels.add_argument("-n", "--count", type=int, default=6, help="number of carousels to request (default: 6)")
+    p_carousels.add_argument("-f", "--frames", type=int, default=8, help="frames (slides) per carousel (default: 8)")
+    p_carousels.add_argument(
+        "--gemini-model",
+        default=DEFAULT_GEMINI_MODEL,
+        help=f"Gemini model id (default: {DEFAULT_GEMINI_MODEL})",
+    )
+
     p_export = sub.add_parser("export", help="export highlights as an XML timeline for DaVinci Resolve")
     p_export.add_argument("input", type=Path, help="video file (finds its .highlights.json) or a .highlights.json directly")
 
@@ -88,6 +98,8 @@ def main(argv: list[str] | None = None) -> None:
         _cmd_transcribe(args)
     elif args.command == "highlights":
         _cmd_highlights(args)
+    elif args.command == "carousels":
+        _cmd_carousels(args)
     elif args.command == "export":
         _cmd_export(args)
     elif args.command == "captions":
@@ -185,6 +197,39 @@ def _cmd_highlights(args: argparse.Namespace, segments_path: Path | None = None)
         print(f"  timeline: {xml_path}  (DaVinci Resolve: File → Import Timeline)")
     else:
         print(f"  (video not found next to the transcript — run `sermon export <video>` for the Resolve XML)")
+
+
+def _cmd_carousels(args: argparse.Namespace) -> None:
+    from .carousels import select_carousels, write_carousels
+
+    segments_path = _resolve_segments_path(args.input)
+    data = json.loads(segments_path.read_text(encoding="utf-8"))
+    segments = data["segments"]
+    if not segments:
+        sys.exit(f"error: {segments_path} contains no segments")
+
+    print(f"Suggesting {args.count} carousels of {args.frames} frames with {args.gemini_model}…")
+    carousels = select_carousels(
+        segments,
+        count=args.count,
+        frames=args.frames,
+        gemini_model=args.gemini_model,
+    )
+
+    stem = segments_path.name.removesuffix(".segments.json")
+    paths = write_carousels(
+        carousels,
+        video_name=data.get("video", stem),
+        stem=stem,
+        out_dir=segments_path.parent,
+        gemini_model=args.gemini_model,
+        frames=args.frames,
+    )
+    print(f"{len(carousels)} carousels:")
+    for i, c in enumerate(carousels, 1):
+        print(f"  {i}. ({c['save_score']}) {c['title']} — {len(c['slides'])} frames")
+    for name, path in paths.items():
+        print(f"  {name}: {path}")
 
 
 def _cmd_export(args: argparse.Namespace) -> None:

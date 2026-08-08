@@ -6,17 +6,27 @@ import { StepFooter } from "./components/StepFooter";
 import { PickVideo } from "./steps/PickVideo";
 import { Transcribe } from "./steps/Transcribe";
 import { Highlights } from "./steps/Highlights";
+import { Carousels } from "./steps/Carousels";
 import { ResolveExport } from "./steps/ResolveExport";
 import { Clips } from "./steps/Clips";
 import { Preview } from "./steps/Preview";
 import { Render } from "./steps/Render";
 
-export type StepKey = "video" | "transcribe" | "highlights" | "export" | "captions" | "preview" | "render";
+export type StepKey =
+  | "video"
+  | "transcribe"
+  | "highlights"
+  | "carousels"
+  | "export"
+  | "captions"
+  | "preview"
+  | "render";
 
 export const STEPS: { key: StepKey; title: string }[] = [
   { key: "video", title: "Video" },
   { key: "transcribe", title: "Transcribe" },
   { key: "highlights", title: "Highlights" },
+  { key: "carousels", title: "Carousels" },
   { key: "export", title: "Edit in Resolve" },
   { key: "captions", title: "Captions" },
   { key: "preview", title: "Preview & Edit" },
@@ -76,6 +86,7 @@ export const App: React.FC = () => {
       video: true,
       transcribe: project != null,
       highlights: project?.steps.transcribe === "done",
+      carousels: project?.steps.transcribe === "done",
       export: project?.steps.highlights === "done",
       captions: (project?.clips.length ?? 0) > 0,
       preview: clip?.has_captions ?? false,
@@ -97,6 +108,7 @@ export const App: React.FC = () => {
           )}
           {step === "transcribe" && project && <Transcribe project={project} onRefresh={refresh} />}
           {step === "highlights" && project && <Highlights project={project} onRefresh={refresh} />}
+          {step === "carousels" && project && <Carousels project={project} onRefresh={refresh} />}
           {step === "export" && project && (
             <ResolveExport
               project={project}
