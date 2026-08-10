@@ -512,7 +512,7 @@ def _build_job(req: JobRequest) -> JobSpec:
         argv = worker_argv(
             "carousels", "--segments", str(segments),
             "--count", str(p.get("count", 6)),
-            "--frames", str(p.get("frames", 8)),
+            "--frames", str(p.get("frames", 5)),
             "--gemini-model", p.get("gemini_model", "gemini-flash-latest"),
         )
         return JobSpec(argv, repo_cwd)

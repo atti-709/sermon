@@ -681,11 +681,10 @@ label.field {
 .carousel-frame p {
   margin: 0;
 }
-/* the cover is one big line — set it like one */
+/* the cover is one big line — set it like one; the **key word** carries the weight */
 .carousel-frame.cover {
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   font-size: 14px;
-  font-weight: 650;
   line-height: 1.35;
 }
 .carousel-frame.last {

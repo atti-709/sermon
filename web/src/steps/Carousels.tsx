@@ -21,6 +21,14 @@ const CopyButton: React.FC<{ label: string; text: string }> = ({ label, text }) 
   );
 };
 
+/** slide texts carry **key word** markers — the template sets exactly that word in bold */
+const renderEmphasis = (text: string): React.ReactNode[] =>
+  text
+    .split(/(\*\*[^*]+\*\*)/g)
+    .map((part, i) =>
+      part.startsWith("**") && part.endsWith("**") ? <b key={i}>{part.slice(2, -2)}</b> : part,
+    );
+
 /** the plain-text form of a carousel, for pasting into the design template */
 const slidesAsText = (c: Carousel): string =>
   c.slides.map((slide, i) => `${i + 1}. ${slide}`).join("\n\n");
@@ -51,7 +59,7 @@ const CarouselCard: React.FC<{ carousel: Carousel; rank: number }> = ({ carousel
           className={`carousel-frame${i === 0 ? " cover" : ""}${i === c.slides.length - 1 ? " last" : ""}`}
         >
           <span className="fnum">{i + 1}</span>
-          <p>{slide}</p>
+          <p>{renderEmphasis(slide)}</p>
         </div>
       ))}
     </div>
@@ -75,7 +83,7 @@ export const Carousels: React.FC<{
   onRefresh: () => Promise<void>;
 }> = ({ project, onRefresh }) => {
   const [count, setCount] = useState(6);
-  const [frames, setFrames] = useState(8);
+  const [frames, setFrames] = useState(5);
   const [geminiModel, setGeminiModel] = useState("gemini-flash-latest");
   const [carousels, setCarousels] = useState<Carousel[] | null>(null);
   const [keyPresent, setKeyPresent] = useState(true);

@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> None:
     p_carousels = sub.add_parser("carousels", help="suggest Instagram carousel texts from an existing transcript with Gemini")
     p_carousels.add_argument("input", type=Path, help="video file (finds its .segments.json) or a .segments.json directly")
     p_carousels.add_argument("-n", "--count", type=int, default=6, help="number of carousels to request (default: 6)")
-    p_carousels.add_argument("-f", "--frames", type=int, default=8, help="frames (slides) per carousel (default: 8)")
+    p_carousels.add_argument("-f", "--frames", type=int, default=5, help="frames (slides) per carousel (default: 5)")
     p_carousels.add_argument(
         "--gemini-model",
         default=DEFAULT_GEMINI_MODEL,

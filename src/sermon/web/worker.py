@@ -272,7 +272,7 @@ def main() -> None:
     p = sub.add_parser("carousels")
     p.add_argument("--segments", required=True)
     p.add_argument("--count", type=int, default=6)
-    p.add_argument("--frames", type=int, default=8)
+    p.add_argument("--frames", type=int, default=5)
     p.add_argument("--gemini-model", default="gemini-flash-latest")
     p.set_defaults(func=run_carousels)
 

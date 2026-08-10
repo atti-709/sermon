@@ -22,7 +22,8 @@ class Carousel(BaseModel):
     )
     source_end: str = Field(description="End timestamp HH:MM:SS of that passage")
     slides: list[str] = Field(
-        description="The slide texts in order: cover line first, one thought per slide, closing takeaway + call to action last"
+        description="The slide texts in order: cover line first, one short line per slide, "
+        "closing takeaway last; the key word of each slide wrapped in **asterisks**"
     )
     caption: str = Field(
         description="Instagram caption in Slovak, 1-3 sentences ending with a question that invites comments; no hashtags"
@@ -51,17 +52,22 @@ short texts a reader swipes through. Each carousel must:
 - read as the speaker's message, not commentary about it — keep the voice, sharpen the words
 - not reuse the core idea of another carousel in the set
 
-SLIDE STRUCTURE — exactly {frames} slides per carousel, in this shape:
-- Slide 1 is the cover: one bold line of at most 10 words that makes a stranger swipe —
-  a claim, a question, or a tension. No emoji, no "1/{frames}", no hashtags.
-- Every middle slide carries ONE thought in 10-30 words, in the sermon's own voice.
-  Each slide has to earn the next swipe: end on tension or an open loop where natural.
-- The last slide lands the takeaway in one or two short sentences, then a gentle one-line
-  call to action (save it, share it, send it to someone who needs it) — never salesy.
+SLIDE STRUCTURE — exactly {frames} slides per carousel. Every slide is ONE short line set in
+large type over a photo, the way quote carousels look on Instagram — a line, never a paragraph:
+- 4-12 words per slide, hard maximum 15
+- Slide 1 is the cover: a bold claim or question of at most 10 words that makes a stranger
+  swipe. No emoji, no "1/{frames}", no hashtags.
+- One thought per slide. A single sentence may also flow across two consecutive slides when
+  it breaks on a natural pause — the swipe pulls the reader into the second half.
+- The last slide is the line people screenshot: the takeaway as one punchy sentence.
+  No call to action, no "save this post" — the line itself has to be worth keeping.
+- In every slide wrap the single most important word (or two-word phrase) in **double
+  asterisks** — the design template sets exactly that word in bold.
 
 WRITING RULES:
 - Slovak, the language of the sermon; wording a non-churchgoer understands, no insider jargon
-- short sentences, no filler — every word on a slide earns its place
+- aphorisms, not summaries: each line should sound like something the speaker actually said
+- no filler — every word on a slide earns its place
 - felt-need topics travel furthest: identity, anxiety, relationships, purpose, failure, hope
 - quote the sermon's own striking phrases verbatim where they are strong
 - carousels get saved and shared, not just seen: write lines people want to keep
@@ -84,7 +90,7 @@ TRANSCRIPT:
 def select_carousels(
     segments: list[dict],
     count: int = 6,
-    frames: int = 8,
+    frames: int = 5,
     gemini_model: str = DEFAULT_GEMINI_MODEL,
 ) -> list[dict]:
     from google import genai  # deferred so transcribe-only runs don't need it configured
